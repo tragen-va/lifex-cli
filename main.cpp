@@ -59,6 +59,7 @@ public:
 
     LxPacket(){
         lxFrame = (lx_frame_t *)malloc(sizeof(struct lx_frame_t));
+        memset(&lxFrame, 0, sizeof(lx_frame_t));
         lxFrame->protocol = 1024;
         lxFrame->addressable = 1;
         lxFrame->reserved_1 = 0;  //origin
@@ -176,6 +177,30 @@ public:
 
 
 
+    char* pack() {
+        
+        char* data = reinterpret_cast<char*>(&lxFrame);        
+        size_t length = sizeof(lx_frame_t);
+
+        std::string hexStr;
+        char buffer[3];
+        for (size_t i = 0; i < length; i++) {
+            snprintf(buffer, sizeof(buffer), "%02X", static_cast<unsigned char>(data[i]));
+            hexStr.append(buffer);
+
+        }
+
+        return hexStr.c_str();
+
+
+
+    }
+
+
+
+
+
+
 };
 
 
@@ -195,10 +220,61 @@ public:
 
 
 
-// lifeX {-on, -off, -setColor} color
+// lifeX {-on(all), -off(all), -setColor( color )} 
 int main(int argc, char* argv[]) {
 
     
+
+    // create socket
+    struct servAddr_in sockAddr = {0};
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd == -1) {
+        perror("failed to create socket");
+        exit(EXIT_FAILURE);
+    }
+    servAddr.sin_family = AF_INET;
+    servAddr.sin_port = htons(56700);
+    servAddr.sin_addr.s_addr = INADDR_ANY;  // 0.0.0.0
+
+
+
+
+
+    // parse command params
+    if (argc == 1) {
+        std::cout << "No commands provided --- exiting" std::endl;
+        return 1;
+    }
+
+
+    for (int i = 1; i < argc; i++) {
+
+
+        if (strcmp(argv[i]), "-on") {
+
+            LxPacket curr = new LxPacket(StateService);
+            curr->setTagged(true);
+            size_t len = sendto(sockfd, (const char*)curr->pack(), strlen(curr->pack(), 0, (struct sockaddr*)&servAddr, sizeof(serverAddr)));
+
+        }
+        else if (strcmp(argv[i]), "-off") {
+
+
+
+
+        }
+        else if (strcmp(argv[i]), "-setColor") {
+
+
+        }
+        
+
+
+
+
+
+    }
+
 
     
 
