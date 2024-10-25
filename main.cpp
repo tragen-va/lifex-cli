@@ -184,9 +184,6 @@ int main(int argc, char* argv[]) {
 
 
 
-
-
-
         // Receive responses
         char buffer[BUFFER_SIZE];
         struct sockaddr_in senderAddr;
@@ -211,17 +208,21 @@ int main(int argc, char* argv[]) {
                 break;
             }
 
-        // make sure response is atleast 36 bytes       
-
-
+            if (recv_bytes < 36) { // minimum header size with no response payload      
+                std::cout << "[-] Invalid response from device - (too small)" << std::endl;
+            }
 
 
         // check if response is lifx protocol
         lx_frame_t* response = (lx_frame_t*)buffer;
         bool include = true;
 
-            if (response->target != 0) {
-                if (response->pkt_type == 3) { 
+
+
+
+
+            if((response->size != recv_bytes || response->target != 0) && response->pkt_type == 3) {
+                
                     for (int i = 0; i < devices.size(); i++) {
                         if (senderAddr.sin_addr.s_addr == devices[i].s_addr ) {
                             include = false;   
@@ -230,11 +231,12 @@ int main(int argc, char* argv[]) {
                     }
                     if (include)
                         devices.push_back(senderAddr.sin_addr);
-                    
             }
 
-        
-            }
+
+
+
+ 
         }
         std::cout << "******   Devices Found on Your network   ******" << std::endl;
         if (devices.size() == 0) 
@@ -249,8 +251,51 @@ int main(int argc, char* argv[]) {
     
 
 
-    } else if (strcmp(argv[1], "-select") == 0) {
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    } else if (strcmp(argv[1], "-select") == 0) {
 
 
 
@@ -258,18 +303,10 @@ int main(int argc, char* argv[]) {
             std::cout << "[-] Missing paramiter - (device)" << std::endl;
             return -1;    
         }
-
-        
-
-        if (strcmp(argv[2], "-all") == 0) {
+  
+        if (strcmp(argv[2], "all") == 0) {
             
             
-
-
-
-
-
-
             // create socket 
             int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
             if (sockfd == -1) {
@@ -334,12 +371,6 @@ int main(int argc, char* argv[]) {
                 std::cout << "Broadcasted packet to network" << std::endl;
             }
 
-
-
-
-
-
-
             // Receive responses
             char buffer[BUFFER_SIZE];
             struct sockaddr_in senderAddr;
@@ -369,6 +400,13 @@ int main(int argc, char* argv[]) {
                 }
 
 
+                
+                if (recv_bytes < 36) { // minimum header size with no response payload      
+                    std::cout << "[-] Invalid response from device - (too small)" << std::endl;
+                }
+
+
+
 
                 lx_frame_t* response = (lx_frame_t*)buffer;
                 if((response->size != recv_bytes || response->target != 0) && response->pkt_type == 3) {
@@ -377,11 +415,10 @@ int main(int argc, char* argv[]) {
                         if (response->target == devices[i]->target)
                             alreadyIn = true;
                     }
-
+                    
                     if(!alreadyIn) {
-                        
-                        lxDevice* device;
-                        stateService* ss = reinterpret_cast<stateService*>(&buffer[recv_bytes - 4]);
+                        lxDevice* device = new lxDevice();
+                        stateService* ss = reinterpret_cast<stateService*>(&buffer[recv_bytes - 5]);
                         device->service = ss->service;
                         device->port = ss->port;
                         device->target = response->target;
@@ -392,6 +429,53 @@ int main(int argc, char* argv[]) {
             }
 
             std::cout << "Number of devices conected: " << devices.size() << std::endl;            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
         } else { // assume argv[2] is ip
@@ -494,7 +578,10 @@ int main(int argc, char* argv[]) {
                     break;
                 }
 
-        
+                 
+                if (recv_bytes < 36) { // minimum header size with no response payload      
+                    std::cout << "[-] Invalid response from device - (too small)" << std::endl;
+                }
 
             
 
