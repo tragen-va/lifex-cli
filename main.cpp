@@ -1,29 +1,39 @@
-#include <stdint.h>
 #include <iostream>
 #include <cstdlib>
-#include <cstring> //strlen()  -  memcpy()
+#include <cstring>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <vector>
+#include <ifaddrs.h>
+
+
+
+
+
+
 
 #pragma pack(push, 1)
-typedef struct lx_frame_t {
-  uint16_t size;
-  uint16_t protocol : 12;
-  uint8_t addressable : 1;
-  uint8_t tagged : 1;
-  uint8_t reserved_1 : 2;
-  uint32_t source;
-
-  uint64_t target;
-  uint8_t reserved_2[6];
-  uint8_t res_required : 1;
-  uint8_t ack_required : 1;
-  uint8_t reserved_3 : 6;
-  uint8_t sequence;
-
-  uint64_t reserved_4;
-  uint16_t pkt_type;
-  uint16_t reserved_5;
+typedef struct {
+    uint16_t size;
+    uint16_t protocol : 12;
+    uint8_t addressable : 1;
+    uint8_t tagged : 1;
+    uint8_t reserved_1 : 2;
+    uint32_t source;
+    uint64_t target;
+    uint8_t reserved_2[6];
+    uint8_t res_required : 1;
+    uint8_t ack_required : 1;
+    uint8_t reserved_3 : 6;
+    uint8_t sequence;
+    uint64_t reserved_4;
+    uint16_t pkt_type;
+    uint16_t reserved_5;
 } lx_frame_t;
 #pragma pack(pop)
+
+
 
 
 
@@ -35,171 +45,56 @@ typedef struct stateService {
 #pragma pack(pop)
 
 
-#define StateService 2
+
+
+#pragma pack(push, 1)
+typedef struct setPower {
+    uint16_t level;         // The power level can be either standby (0) or enabled (65535)
+    uint32_t duration;      // The duration is the power level transition time in milliseconds
+} setPower;   
+#pragma pack(pop)
 
 
 
+
+#pragma pack(push, 1)
+typedef struct lxDevice {
+    uint8_t service;
+    uint32_t port;
+    uint64_t target;
+} lxDevice;
+#pragma pack(pop)
+
+
+
+
+
+
+
+
+
+#define GetService 2
+#define LIFX_PORT 56700
+#define BUFFER_SIZE 1024
+#define SetPower 117
 
 
 
 
 class LxPacket {
+
 public:
 
-
-
     lx_frame_t* lxFrame;
-    lx_frame_t* receivedFrame;
-    char* response;
-    stateService* sService;
-    uint16_t payloadSize;
 
 
 
+    LxPacket() {
 
-    LxPacket(){
-        lxFrame = (lx_frame_t *)malloc(sizeof(struct lx_frame_t));
-        memset(&lxFrame, 0, sizeof(lx_frame_t));
-        lxFrame->protocol = 1024;
-        lxFrame->addressable = 1;
-        lxFrame->reserved_1 = 0;  //origin
-        lxFrame->sequence = 0;
-        lxFrame->source = std::rand() % 257;
-    }
-    
-
-    LxPacket(uint16_t Pkt_type){
-        lxFrame = (lx_frame_t *)malloc(sizeof(struct lx_frame_t));
-        lxFrame->protocol = 1024;
-        lxFrame->addressable = 1;
-        lxFrame->reserved_1 = 0;  //origin
-        lxFrame->sequence = 0;
-        lxFrame->source = std::rand() % 257;
-        lxFrame->pkt_type = Pkt_type;
-    }
-
-
-
-
-
-
-    void setAddressable(bool x) {
-        if(x)
-            lxFrame->addressable = 1;
-        else
-            lxFrame->addressable = 0;
-    }
-    void setTagged(bool x) {
-        if(x)
-            lxFrame->tagged = 1;
-        else
-            lxFrame->tagged = 0;
-    }
-    void setRes_required(bool x) {
-        if(x)
-            lxFrame->res_required = 1;
-        else
-            lxFrame->res_required = 0;
-    }   
-
-    void setAck_required(bool x) {
-        if(x)
-            lxFrame->ack_required = 1;
-        else
-            lxFrame->ack_required = 0;
-    }
-    void incrementSequence() {
-        if (lxFrame->sequence == 254)            // can probably make beter
-            lxFrame->sequence = 0;
-        else
-            lxFrame->sequence++;
-    }
-    void setSize() {
-        lxFrame->size = 36 + payloadSize;
-    }
-    void setPayloadSize(int x) {
-        payloadSize = x;
-    }
-    void extractTarget() {
-
-        // add logic
-        // not sure if need or can just take from decoded packet
-        // only for printing I think
-    }
-
-    bool unpack(char *hex) {
-
-        int str_len = strlen(hex);
         
-        if (str_len < 72) {
-          return false;
-        }
-
-        uint8_t buffer[36] = {};
-        for (int i = 0; i < (str_len / 2) && i < 72; i++) {
-          unsigned int nxt;
-          sscanf(hex + 2 * i, "%02x", &nxt);
-          buffer[i] = (uint8_t)nxt;
-        }
-        memcpy(receivedFrame, buffer, 36);
-
-        // get response
-    
-        if (str_len > 72) {
-            response = (char*)malloc((str_len - 72));
-            processResponse(receivedFrame->pkt_type);            
-
-        }
+        lxFrame = (lx_frame_t *)malloc(sizeof(lx_frame_t));
+        memset(lxFrame, 0, sizeof(lx_frame_t));
     }
-
-
-    // posisbly get rid of pk_type and ljust look at reiced
-    bool processResponse(uint16_t pk_type) {
-
-            if(pk_type == StateService) { 
-                int str_len = strlen(response);
-                if (str_len != 5) {
-                    return false;
-                }
-            
-                uint8_t buffer[str_len / 2] = {};
-                for (int i = 0; i < (str_len / 2); i++) {
-                    unsigned int nxt;
-                    sscanf(response + 2 * i, "%02x", &nxt);
-                    buffer[i] = (uint8_t)nxt;    
-                }
-
-                memcpy(response, buffer, (str_len / 2));
-
-            }
-    }
-
-
-
-
-    char* pack() {
-        
-        char* data = reinterpret_cast<char*>(&lxFrame);        
-        size_t length = sizeof(lx_frame_t);
-
-        std::string hexStr;
-        char buffer[3];
-        for (size_t i = 0; i < length; i++) {
-            snprintf(buffer, sizeof(buffer), "%02X", static_cast<unsigned char>(data[i]));
-            hexStr.append(buffer);
-
-        }
-
-        return hexStr.c_str();
-
-
-
-    }
-
-
-
-
-
 
 };
 
@@ -208,81 +103,460 @@ public:
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-// lifeX {-on(all), -off(all), -setColor( color )} 
 int main(int argc, char* argv[]) {
 
-    
-
-    // create socket
-    struct servAddr_in sockAddr = {0};
-    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sockfd == -1) {
-        perror("failed to create socket");
-        exit(EXIT_FAILURE);
-    }
-    servAddr.sin_family = AF_INET;
-    servAddr.sin_port = htons(56700);
-    servAddr.sin_addr.s_addr = INADDR_ANY;  // 0.0.0.0
 
 
 
 
-
-    // parse command params
-    if (argc == 1) {
-        std::cout << "No commands provided --- exiting" std::endl;
-        return 1;
+    if (argc == 1) { 
+        std::cout << "No paramiters passed" << std::endl;
+        return -1;
     }
 
+    if (strcmp(argv[1], "-list") == 0) {
 
-    for (int i = 1; i < argc; i++) {
-
-
-        if (strcmp(argv[i]), "-on") {
-
-            LxPacket curr = new LxPacket(StateService);
-            curr->setTagged(true);
-            size_t len = sendto(sockfd, (const char*)curr->pack(), strlen(curr->pack(), 0, (struct sockaddr*)&servAddr, sizeof(serverAddr)));
-
+        // create socket 
+        int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+        if (sockfd == -1) {
+            perror("failed to create socket");
+            exit(EXIT_FAILURE);
         }
-        else if (strcmp(argv[i]), "-off") {
 
 
 
 
+        // enable broadcast on socket
+        int broadcastEnable = 1;
+        if (setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable)) < 0) {
+            perror("Failed to set SO_BROADCAST");
+            close(sockfd);
+            exit(EXIT_FAILURE);
         }
-        else if (strcmp(argv[i]), "-setColor") {
 
 
+
+        // bind socket to recieve response
+        struct sockaddr_in localAddr;
+        memset(&localAddr, 0, sizeof(localAddr));
+        localAddr.sin_family = AF_INET;
+        localAddr.sin_port = htons(LIFX_PORT);
+        localAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+
+        if (bind(sockfd, (struct sockaddr*)&localAddr, sizeof(localAddr)) < 0) {
+            perror("Bind failed");
+            close(sockfd);
+            exit(EXIT_FAILURE);
         }
+
+
+        // Set up the broadcast address structure
+        struct sockaddr_in broadcastAddr;
+        memset(&broadcastAddr, 0, sizeof(broadcastAddr));
+        broadcastAddr.sin_family = AF_INET;
+        broadcastAddr.sin_port = htons(LIFX_PORT);
+        broadcastAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+
+
+
+        LxPacket* curr = new LxPacket();
+        curr->lxFrame->size = sizeof(curr->lxFrame);
+        curr->lxFrame->protocol = 1024;
+        curr->lxFrame->addressable = 1;
+        curr->lxFrame->tagged = 1;
+        curr->lxFrame->source = 123;
+        curr->lxFrame->pkt_type = GetService;
         
 
 
+        // send boradcast getService message
+        ssize_t sent_bytes = sendto(sockfd, curr->lxFrame, sizeof(*curr->lxFrame), 0, (struct sockaddr*)&broadcastAddr, sizeof(broadcastAddr));
+        if (sent_bytes < 0) {
+            perror("sendto failed");
+            close(sockfd);
+            delete curr;
+            return -1;
+        } else {
+            std::cout << "Broadcasted packet to network" << std::endl;
+        }
 
 
 
-    }
+
+
+
+
+        // Receive responses
+        char buffer[BUFFER_SIZE];
+        struct sockaddr_in senderAddr;
+        socklen_t senderAddrLen = sizeof(senderAddr);
+
+        std::cout << "Waiting for responses..." << std::endl;
+
+
+        // Set socket to non-blocking so we can stop listening after some time
+        struct timeval tv;
+        tv.tv_sec = 5;  // Wait for 5 seconds
+        tv.tv_usec = 0;
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+                
+        std::vector<in_addr> devices;
+        while (true) {
+            ssize_t recv_bytes = recvfrom(sockfd, buffer, BUFFER_SIZE, 0,
+                                          (struct sockaddr*)&senderAddr, &senderAddrLen);
+
+            if (recv_bytes < 0) {
+                // Timeout or no more data, break the loop
+                break;
+            }
+
+        // make sure response is atleast 36 bytes       
+
+
+
+
+        // check if response is lifx protocol
+        lx_frame_t* response = (lx_frame_t*)buffer;
+        bool include = true;
+
+            if (response->target != 0) {
+                if (response->pkt_type == 3) { 
+                    for (int i = 0; i < devices.size(); i++) {
+                        if (senderAddr.sin_addr.s_addr == devices[i].s_addr ) {
+                            include = false;   
+                                
+                        }
+                    }
+                    if (include)
+                        devices.push_back(senderAddr.sin_addr);
+                    
+            }
+
+        
+            }
+        }
+        std::cout << "******   Devices Found on Your network   ******" << std::endl;
+        if (devices.size() == 0) 
+            std::cout << "No Devices Found" << std::endl;
+
+        for (int i = 0; i < devices.size(); i++) {
+            std::cout << "Device " << (i + 1) << ": " << inet_ntoa(devices[i]) << std::endl;
+        }
+
+        // Close the socket
+        close(sockfd);
+    
+
+
+    } else if (strcmp(argv[1], "-select") == 0) {
+
+
+
+
+        if (argc < 2) {
+            std::cout << "[-] Missing paramiter - (device)" << std::endl;
+            return -1;    
+        }
+
+        
+
+        if (strcmp(argv[2], "-all") == 0) {
+            
+            
+
+
+
+
+
+
+            // create socket 
+            int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+            if (sockfd == -1) {
+                perror("failed to create socket");
+                exit(EXIT_FAILURE);
+            }
+
+
+
+
+            // enable broadcast on socket
+            int broadcastEnable = 1;
+            if (setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable)) < 0) {
+                perror("Failed to set SO_BROADCAST");
+                close(sockfd);
+                exit(EXIT_FAILURE);
+            }
+
+
+
+            // bind socket to recieve response
+            struct sockaddr_in localAddr;
+            memset(&localAddr, 0, sizeof(localAddr));
+            localAddr.sin_family = AF_INET;
+            localAddr.sin_port = htons(LIFX_PORT);
+            localAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+            if (bind(sockfd, (struct sockaddr*)&localAddr, sizeof(localAddr)) < 0) {
+                perror("Bind failed");
+                close(sockfd);
+                exit(EXIT_FAILURE);
+            }
+
+
+            // Set up the broadcast address structure
+            struct sockaddr_in broadcastAddr;
+            memset(&broadcastAddr, 0, sizeof(broadcastAddr));
+            broadcastAddr.sin_family = AF_INET;
+            broadcastAddr.sin_port = htons(LIFX_PORT);
+            broadcastAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+
+
+
+            LxPacket* curr = new LxPacket();
+            curr->lxFrame->size = sizeof(curr->lxFrame);
+            curr->lxFrame->protocol = 1024;
+            curr->lxFrame->addressable = 1;
+            curr->lxFrame->tagged = 1;
+            curr->lxFrame->source = 123;
+            curr->lxFrame->pkt_type = GetService;
+            
+
+
+            // send boradcast getService message
+            ssize_t sent_bytes = sendto(sockfd, curr->lxFrame, sizeof(*curr->lxFrame), 0, (struct sockaddr*)&broadcastAddr, sizeof(broadcastAddr));
+            if (sent_bytes < 0) {
+                perror("sendto failed");
+                close(sockfd);
+                delete curr;
+                return -1;
+            } else {
+                std::cout << "Broadcasted packet to network" << std::endl;
+            }
+
+
+
+
+
+
+
+            // Receive responses
+            char buffer[BUFFER_SIZE];
+            struct sockaddr_in senderAddr;
+            socklen_t senderAddrLen = sizeof(senderAddr);
+
+            std::cout << "Waiting for responses..." << std::endl;
+
+
+            // Set socket to non-blocking so we can stop listening after some time
+            struct timeval tv;
+            tv.tv_sec = 5;  // Wait for 5 seconds
+            tv.tv_usec = 0;
+            setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+                    
+            
+
+            std::vector<lxDevice*> devices;
+
+            
+             while (true) {
+                ssize_t recv_bytes = recvfrom(sockfd, buffer, BUFFER_SIZE, 0,
+                                              (struct sockaddr*)&senderAddr, &senderAddrLen);
+
+                if (recv_bytes < 0) {
+                    // Timeout or no more data, break the loop
+                    break;
+                }
+
+
+
+                lx_frame_t* response = (lx_frame_t*)buffer;
+                if((response->size != recv_bytes || response->target != 0) && response->pkt_type == 3) {
+                    bool alreadyIn = false;
+                    for (int i = 0; i < devices.size(); i++) {
+                        if (response->target == devices[i]->target)
+                            alreadyIn = true;
+                    }
+
+                    if(!alreadyIn) {
+                        
+                        lxDevice* device;
+                        stateService* ss = reinterpret_cast<stateService*>(&buffer[recv_bytes - 4]);
+                        device->service = ss->service;
+                        device->port = ss->port;
+                        device->target = response->target;
+                        devices.push_back(device);
+
+                    }
+                  } 
+            }
+
+            std::cout << "Number of devices conected: " << devices.size() << std::endl;            
+
+
+        } else { // assume argv[2] is ip
+        
+        
+            // check if argv is valid ip
+            in_addr* deviceIp;
+            int result = inet_aton(argv[2], deviceIp);
+            if (!result) {
+                std::cout << "[-] IP address invalid" << std::endl;
+                return -1;
+            }
+    
+
+
+
+            // create socket 
+            int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+            if (sockfd == -1) {
+                perror("failed to create socket");
+                exit(EXIT_FAILURE);
+            }
+
+
 
 
     
+            // bind socket to recieve response
+            struct sockaddr_in localAddr;
+            memset(&localAddr, 0, sizeof(localAddr));
+            localAddr.sin_family = AF_INET;
+            localAddr.sin_port = htons(LIFX_PORT);
+            localAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+            
+
+
+            if (bind(sockfd, (struct sockaddr*)&localAddr, sizeof(localAddr)) < 0) {
+                perror("Bind failed");
+                close(sockfd);
+                exit(EXIT_FAILURE);
+            }
+
+
+            localAddr.sin_addr.s_addr = deviceIp->s_addr;
+
+
+
+
+
+
+
+            // Set up the structure for GetService to confirm port
+            
+            LxPacket* curr = new LxPacket();
+            curr->lxFrame->size = sizeof(curr->lxFrame);
+            curr->lxFrame->protocol = 1024;
+            curr->lxFrame->addressable = 1;
+            curr->lxFrame->source = 123;
+            curr->lxFrame->pkt_type = GetService;
+
+
+
+
+            // send  getService message
+            ssize_t sent_bytes = sendto(sockfd, curr->lxFrame, sizeof(*curr->lxFrame), 0, (struct sockaddr*)&localAddr, sizeof(localAddr));
+            if (sent_bytes < 0) {
+                perror("sendto failed");
+                close(sockfd);
+                delete curr;
+                return -1;
+            } else {
+                std::cout << "Atempting to reach " << argv[2] << std::endl;
+            }
+
+
+
+
+
+             // Receive responses
+            char buffer[BUFFER_SIZE];
+            struct sockaddr_in senderAddr;
+            socklen_t senderAddrLen = sizeof(senderAddr);
+
+            std::cout << "Waiting for responses..." << std::endl;
+
+
+            // Set socket to non-blocking so we can stop listening after some time
+            struct timeval tv;
+            tv.tv_sec = 5;  // Wait for 5 seconds
+            tv.tv_usec = 0;
+            setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+                    
+            lxDevice* device;
+            while (true) {
+                ssize_t recv_bytes = recvfrom(sockfd, buffer, BUFFER_SIZE, 0,
+                                              (struct sockaddr*)&senderAddr, &senderAddrLen);
+
+                if (recv_bytes < 0) {
+                    // Timeout or no more data, break the loop
+                    break;
+                }
+
+        
+
+            
+
+            // check if response is lifx protocol
+            lx_frame_t* response = (lx_frame_t*)buffer;
+                if (response->target != 0) {
+                    if (response->pkt_type == 3)   
+                            
+
+                        if (recv_bytes != 41) {
+                            std::cout << "[-] Inproper response from device - (not expected size recived)" << std::endl;
+                            return -1;
+                        }
+                        stateService* ss = reinterpret_cast<stateService*>(&buffer[recv_bytes - 4]);
+                        device->service = ss->service;
+                        device->port = ss->port;
+                        device->target = response->target;
+                        break;      // only need 1 response from getService
+                        
+                }
+
+            
+
+
+
+
+                            
+
+
+            }
+
+
+
+                std::cout << "recieved response from " << device->target << std::endl; 
+                // make sure port is correct
+
+
+
+
+
+
+
+
+
+
+
+
+        }
+
+
+    
+    }
+
+
+
+
 
     return 0;
 
 
+
+
+
 }
-
-
-
 
