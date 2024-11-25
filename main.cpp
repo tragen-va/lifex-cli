@@ -1,6 +1,6 @@
 // possible add response type to Response to chekc if pkt_type is a expacted
 // instead of using getVersion and lookin up for listDevices use get and use label and only loopup when -info is called
-// add default colors
+// add default colors 
 #include <iostream>
 #include <cstdlib>
 #include <cstring>
@@ -194,6 +194,9 @@ bool printInfo(bool broadcast, uint32_t ip);
 HSBK* toHS(char* hexOrRGb);
 bool setColorF(bool broadcast, uint32_t ip, int duration, char* color);
 void printHelp();
+bool setKelvin(bool broadcast, uint32_t ip, int duration, uint16_t kelvin);
+bool convertToUint16(const char* str, uint16_t& result);
+
 
 
 
@@ -416,7 +419,7 @@ Response* sendPacket(lx_frame_t* header, T* payload, lxDevice* lxDev) {
 
 
 
-
+/*
 int main(int argc, char* argv[]) {
 
     if (isInParams(argc, argv, "-list")) {
@@ -632,11 +635,78 @@ int main(int argc, char* argv[]) {
 
             setColorF(true, 0, duration, color);
          }
+    } else if (isInParams(argc, argv, "-warmth")) {
+
+    
+        // check for duration and if valid argument
+        int duration = 0;
+        if (isInParams(argc, argv, "-duration")) {
+            char* endptr;
+            char* str = getNextParam(argc, argv, "-duration");
+            int num2 = strtol(str, &endptr, 10);
+            if (endptr != str) {
+                std::cout << "[-] invalid duration value: " << str << std::endl;
+                return -1;
+            }
+            duration = num2;
+        }
+
+
+
+        char* str2 = getNextParam(argc, argv, "-warmth");
+        if (str2 == nullptr) {
+            std::cout << "[-] Invalid warmth value, use -help for instructions" << std::endl;
+        }            
+
+        uint16_t kelvin;
+        bool result4;
+        try {
+            result4 = convertToUint16(str2, kelvin);
+        } catch (const std::range_error& e) {
+            std::cerr << "Error: " << e.what() << std::endl;
+            std::cout << "[-] Invalid warmth value: " << str2 << "     - (main/warmth)" << std::endl;
+            return -1;
+        }
+        if (kelvin < 2500 || kelvin > 9000) {
+            std::cout << "Warmth value " << kelvin << " out of range, must be between 2500 to 9000" << std::endl;
+            return -1;
+        }
+
+
+
+        if (isInParams(argc, argv, "-ip")) {
+            
+            char* ipPtr = getNextParam(argc, argv, "-ip");
+            if (ipPtr == nullptr) {
+                std::cout << "[-] invalid ip - EX. -ip 192.168.1.22" << std::endl;
+                return -1;
+            }
+            
+            in_addr deviceIp;
+            int result = inet_aton(ipPtr, &deviceIp);
+            if (!result) {
+                std::cout << "[-] IP address invalid" << std::endl;
+                return -1;
+            }
+            uint32_t ip = deviceIp.s_addr;
+ 
+        
+            
+            setKelvin(false, ip, duration, kelvin);
+        
+        } else if (isInParams(argc, argv, "-all")) {
+
+            setKelvin(true, 0, duration, kelvin);
+            }
+
+
     } else {
         std::cout << "[-] Input not recognized as valid, use -help for instructions" << std::endl;
     }
 
 }
+// bool setKelvin(bool broadcast, uint32_t ip, int duration, uint16_t kelvin);
+*/
 
 
 
@@ -766,7 +836,7 @@ bool listDevices() {
     std::vector<in_addr> addrs = getAllDevices();
     if (addrs.size() == 0) {
         std::cout << "No lifx devices found on your network" << std::endl;
-        return -1;
+        return false;
     }
     
 
@@ -789,7 +859,7 @@ bool listDevices() {
         Response* resp = sendPacket<nullPtr>(header, nullptr, device);                                                     
         if (resp == nullptr) {
             std::cout << "No response from device to getService" << std::endl;                                                  // shoudl probably try a couple more times before giving up
-            return -1;
+            return false;
         }      
         stateService* sS = const_cast<stateService*>(reinterpret_cast< const stateService*>(resp->content));
         device->port = htons(sS->port);
@@ -800,7 +870,7 @@ bool listDevices() {
         Response* resp2 = sendPacket<nullPtr>(header, nullptr, device);                                                        
         if (resp2 == nullptr) {
             std::cout << "No response from device to getVersion" << std::endl;                                                  // shoudl probably try a couple more times before giving up
-            return -1;
+            return false;
         }
         stateVersion* sV = const_cast<stateVersion*>(reinterpret_cast<const stateVersion*>(resp2->content));
 
@@ -810,7 +880,7 @@ bool listDevices() {
         Response* resp3 = sendPacket<nullPtr>(header, nullptr, device);                                             
         if (resp3 == nullptr) {
             std::cout << "No response from device to getPower" << std::endl;                                                  // shoudl probably try a couple more times before giving up
-            return -1;
+            return false;
         }
         statePower* sP = const_cast<statePower*>(reinterpret_cast<const statePower*>(resp3->content));
         
@@ -940,7 +1010,8 @@ bool setPower(bool broadcast, bool brightness, uint32_t ip, int level, int durat
         header->pkt_type = GetService;
         device->address.s_addr = addrs[i].s_addr;
         device->port = htons(DEFAULT_LIFX_PORT);
-        
+       
+
         // send and recieve getService packet
         Response* resp0 = sendPacket<nullPtr>(header, nullptr, device);                                                     
         if (resp0 == nullptr) {
@@ -962,7 +1033,8 @@ bool setPower(bool broadcast, bool brightness, uint32_t ip, int level, int durat
             } else {
                 setPow->level = 65535;
             }
-            
+           
+            header->ack_required = 1; 
             device->address = addrs[i];          
             Response* resp = sendPacket<setLightPower>(header, setPow, device);
             if (resp == nullptr) {
@@ -987,8 +1059,8 @@ bool setPower(bool broadcast, bool brightness, uint32_t ip, int level, int durat
             setCol->color.brightness = level;
             setCol->reserved = 0;
             header->pkt_type = 102; 
+            header->ack_required = 1;
 
-            std::cout << "before get service, address: " << inet_ntoa(device->address) << ", Port: " << device->port << ", level " << level << std::endl; ///////////////////////////////////////////////////
             Response* resp2 = sendPacket<setColor>(header, setCol, device);
             if (resp2 == nullptr) {
                 std::cout << "[-] No response to setColor packet - setPow/5" << std::endl;
@@ -1287,23 +1359,341 @@ void printHelp() {
     std::cout << "\n" << std::endl;
       
     std::cout << "---- Command flags" << std::endl;
-    std::cout << "  -on" << std::endl;
-    std::cout << "  -off" << std::endl;
-    std::cout << "  -color {rgb or hex}                ex. -color 0xffffff   or -color (rrr,ggg,bbb)" << std::endl;
-    std::cout << "  -list                              lists all devices on netowrk" << std::endl;
-    std::cout << "  -info                              provides verbose product/device details" << std::endl;
-    std::cout << "  -brightness {percent}              ex. -brightness 50" << std::endl;
-
+    std::cout << "   -on" << std::endl;
+    std::cout << "   -off" << std::endl;
+    std::cout << "   -color {rgb or hex}                ex. -color 0xffffff   or -color (rrr,ggg,bbb)" << std::endl;
+    std::cout << "   -list                              lists all devices on netowrk" << std::endl;
+    std::cout << "   -info                              provides verbose details about selected device(s)" << std::endl;
+    std::cout << "   -brightness {percent}              ex. -brightness 50" << std::endl;
+    std::cout << "   -warmth {kelvin}                   kelvin: range 2500(warm) to  9000(cool) " << std::endl;
     std::cout << std::endl;
 
     std::cout << "---- Select flags" << std::endl;
     std::cout << "   -ip {ipv4}                         ex. -ip 192.168.8.141" << std::endl;
+    std::cout << "   -all                               apply command to all devices on your network" << std::endl;
     std::cout << std::endl;
 
     std::cout << "---- Optinal flags" << std::endl;
     std::cout << "   -duration {time in ms}             ex. -duration 100" << std::endl;
+    std::cout << "\n" << std::endl;
 
+
+    std::cout << "Typial Usage -----" << std::endl;
+    std::cout << "> lifx -list                            (find device you want's ip)" << std::endl;
+    std::cout << "> lifx -on -ip 192.168.8.141" << std::endl;
+    std::cout << "> lifx -color 0x0000ff -ip 192.168.8.141" << std::endl;
+    std::cout << "\n\n\n" << std::endl;
 }
+
+
+
+
+
+// Kelvin: range 2500° (warm) to 9000° (cool)
+// set staturation to 0 to get rid of color
+bool setKelvin(bool broadcast, uint32_t ip, int duration, uint16_t kelvin) {
+    lx_frame_t* header = new lx_frame_t();
+    lxDevice* device = new lxDevice();
+    setColor* setCol = new setColor();
+ 
+    std::vector<in_addr> addrs;
+    if (broadcast) {
+        addrs = getAllDevices();
+    } else {
+        in_addr* addr = new in_addr();
+        addr->s_addr = ip;
+        addrs.push_back(*addr);
+    }
+
+    for (int i = 0; i < addrs.size(); i++) {
+
+        header->protocol = 1024;
+        header->addressable = 1;
+        header->source = SOURCE;
+        header->sequence = 0;
+        header->size = HEADER_SIZE;
+        header->pkt_type = GetService;
+        device->address = addrs[i];                        
+        device->port = htons(DEFAULT_LIFX_PORT);
+
+        // send and recieve getService packet
+        Response* resp0 = sendPacket<nullPtr>(header, nullptr, device);                                                     
+        if (resp0 == nullptr) {
+            std::cout << "[-] No response from device to getService - (setKelvin)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
+            return false;
+        }      
+        stateService* sS = const_cast<stateService*>(reinterpret_cast< const stateService*>(resp0->content));
+        device->port = htons(sS->port);
+        header->sequence++;
+    
+
+
+        // prepare, send, and recive get packet (for label)
+        header->pkt_type = GET;
+        Response* resp4 = sendPacket<nullPtr>(header, nullptr, device);
+        if (resp4 == nullptr) {
+            std::cout << "[-] No response from device to Get packet - (setKelvin)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
+            return false;
+        }
+        state* s = const_cast<state*>(reinterpret_cast<const state*>(resp4->content));
+        header->sequence++;
+
+
+        header->pkt_type = SET_COLOR;
+        setCol->color.saturation = 0;
+        setCol->color.hue = s->color.hue;
+        setCol->color.brightness = s->color.brightness;
+        setCol->color.kelvin = kelvin;
+        setCol->duration = duration;
+
+        
+        header->ack_required = 1;
+        Response* resp3 = sendPacket<setColor>(header, setCol, device);
+        if (resp3 == nullptr) {
+            std::cout << "[-]/2 No response from device to Get packet - (setKelvin)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
+            return false;
+        }
+        state* s2 = const_cast<state*>(reinterpret_cast<const state*>(resp3->content));
+        header->sequence++;
+    
+        memset(header, 0, sizeof(header));
+        memset(device, 0, sizeof(device));
+    }
+    return true;  
+}
+
+
+
+
+bool convertToUint16(const char* str, uint16_t& result) {
+    try {
+        // Convert char* to int using std::stoi
+        int value = std::stoi(str);
+
+        // Check if the value is within the range of uint16_t
+        if (value < 0 || value > std::numeric_limits<uint16_t>::max()) {
+            throw std::range_error("Value out of range for uint16_t");
+        }
+
+        // Return the value as uint16_t
+        result =  static_cast<uint16_t>(value);
+        return true;
+    } catch (const std::invalid_argument& e) {
+        // If std::stoi can't convert, handle the invalid input
+        throw std::range_error("Invalid input, unable to convert to uint16_t");
+    } catch (const std::out_of_range& e) {
+        // If the number is too large for an int
+        throw std::range_error("Value out of range for int");
+    }
+    return false;
+}
+
+
+
+
+bool charToUint32(const char* str, uint32_t& result) {
+    // Check if input string is null
+    if (str == nullptr) {
+        std::cerr << "Error: Input string is null." << std::endl;
+        return false;
+    }
+
+    // Initialize errno to 0 before conversion
+    errno = 0;
+    char* endPtr = nullptr;
+
+    // Convert string to unsigned long using strtoul
+    unsigned long temp = std::strtoul(str, &endPtr, 10);
+
+    // Check for conversion errors
+    if (errno == ERANGE || temp > std::numeric_limits<uint32_t>::max()) {
+        std::cerr << "Error: Value out of range for uint32_t." << std::endl;
+        return false;
+    }
+
+    // Check if the whole string was converted
+    if (*endPtr != '\0') {
+        std::cerr << "Error: Invalid characters found in input string." << std::endl;
+        return false;
+    }
+
+    // Assign the result
+    result = static_cast<uint32_t>(temp);
+    return true;
+}
+
+
+
+
+
+
+
+
+
+int main(int argc, char* argv[]) {
+
+    uint32_t ip;
+    bool broadcast = false;
+    uint32_t duration = 0; 
+
+
+
+
+    // help
+    if (isInParams(argc, argv, "-help") || isInParams(argc, argv, "--help") || isInParams(argc, argv, "-h")) {
+        printHelp();
+        return 0;
+    }
+
+    if (isInParams(argc, argv, "-list")) {
+        bool listDevsResult = listDevices();
+        if (!listDevsResult)
+            return -1;
+        return 0;
+    }
+
+
+
+    // duration
+    if (isInParams(argc, argv, "-duration")) {
+        char* durStr = getNextParam(argc, argv, "-duration");
+        if (durStr == nullptr) {
+            std::cout << "[-] Invalid duration value, use -help for instructions - (m)" << std::endl;
+            return -1;
+        }
+        bool durationResult = charToUint32(durStr, duration); 
+        if (!durationResult) {
+            std::cout << "[-] Invalid duration value: " << durStr << ",  use -help for proper usage - (m)" << std::endl;
+            return -1;
+        }
+    }
+
+
+
+    // ip
+    if (isInParams(argc, argv, "-ip")) {
+        char* ipPtr = getNextParam(argc, argv, "-ip");
+        if (ipPtr == nullptr) {
+            std::cout << "[-] invalid ip - EX. -ip 192.168.1.22" << std::endl;
+            return -1;
+        }
+        in_addr deviceIp;
+        int ipResult = inet_aton(ipPtr, &deviceIp);
+        if (!ipResult) {
+            std::cout << "[-] IP address invalid: " << ipPtr << ", use -help for proper usage - (m)" << std::endl;
+            return -1;
+        }
+        ip = deviceIp.s_addr;
+    } else if (isInParams(argc, argv, "-all")) {
+        ip = 0;
+        broadcast = true;
+    } else {
+        std::cout << "[-] device(s) selected, use -help for proper usage - (m)" << std::endl;
+        return -1;
+    }
+
+
+
+
+    // command flags 
+    if (isInParams(argc, argv, "-on")) {
+        bool onResult = setPower(broadcast, false, ip, 65535, duration);
+        if (!onResult)             
+            return -1;
+        return 0;
+
+    } else if (isInParams(argc, argv, "-off")) {
+        bool offResult = setPower(broadcast, false, ip, 0, duration);
+        if (!offResult)             
+            return -1;
+        return 0;
+
+    } else if (isInParams(argc, argv, "-color")) {
+        char* color = getNextParam(argc, argv, "-color");
+        if (color == nullptr) {
+            std::cout << "[-] invalid color provided, use -help for proper usage" << std::endl;
+            return -1;
+        }
+        setColorF(broadcast, ip, duration, color);  
+        return 0;        
+
+    } else if (isInParams(argc, argv, "-warmth")) {
+
+        
+        // get, check, and convert brightness value from params
+        uint16_t kelvin = 0;  
+        char* wStr = getNextParam(argc, argv, "-warmth");
+        if (wStr == nullptr) {
+            std::cout << "[-] Invalid warmth value, use -help for instructions - (m)" << std::endl;
+        }            
+        bool warmthResult;
+         try {
+            warmthResult = convertToUint16(wStr, kelvin);
+        } catch (const std::range_error& e) {
+            std::cerr << "Error: " << e.what() << std::endl;
+            std::cout << "[-] Invalid warmth value: " << wStr << "     - (main/warmth)" << std::endl;
+            return -1;
+        }
+        if (kelvin < 2500 || kelvin > 9000) {
+            std::cout << "Warmth value " << kelvin << " out of range, must be between 2500 to 9000" << std::endl;
+            return -1;
+        }
+
+        warmthResult = setKelvin(broadcast, ip, duration, kelvin);
+        if (!warmthResult) 
+            return -1;
+        return 0;
+
+
+    }  else if (isInParams(argc, argv, "-info")) {
+        bool infoResult = printInfo(broadcast, ip); 
+        if (!infoResult)
+            return -1;
+        return 0;
+    
+    } else if (isInParams(argc, argv, "-brightness")) {
+
+        
+        // get, check, and convert brightness value from params
+        char* bStr = getNextParam(argc, argv, "-brightness");
+        if (bStr == nullptr) {
+            std::cout << "[-] invalid brightness value, use -help for proper usage - (m)" << std::endl;
+            return -1;
+        }
+        uint16_t tempBrightness;
+        bool brightnessResult = convertToUint16(bStr, tempBrightness);
+        if (!brightnessResult)
+            return -1;
+        if (tempBrightness > 100) {
+            std::cout << "[-] invalid brightness, value entered " << tempBrightness << " shoud be percent so cannot exceed 100" << std::endl;
+            return -1;
+        }
+        float tempBrightness2 = static_cast<float>(tempBrightness) / 100.0f;
+        uint16_t brightness = static_cast<uint16_t>(65535 * tempBrightness2);
+    
+
+        bool setPowerResult = setPower(broadcast, true, ip, brightness, duration);
+        if (!setPowerResult)             
+            return -1;
+        return 0;
+
+    } else {
+        std::cout << "[-] no comand flag provided, use -help for proper usage" << std::endl;
+        return -1;
+    }
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
 
 
 
