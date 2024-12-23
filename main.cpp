@@ -1,6 +1,15 @@
-// possible add response type to Response to chekc if pkt_type is a expacted
+// ************   Feature To Add   **************
+// add to the toHS funciton that it gets the current brightness and sets that
+// add default colors
+// adding multi response sendPacket so can capture multizone info to save scenes
 // instead of using getVersion and lookin up for listDevices use get and use label and only loopup when -info is called
-// add default colors 
+// cut down the ammount of time it takes to get a response
+// make ack_reauired on all the time and add acknowledgement to all respose types incase some firmwares dont response to certain messages
+
+// ***********    Bugs to Fix      **************
+// buffering on legacy multiZone changes not wokring as expected
+
+
 #include <iostream>
 #include <cstdlib>
 #include <cstring>
@@ -15,7 +24,7 @@
 #include <string>
 #include <math.h>
 #include <algorithm> 
-
+#include <random>
 
 
 #pragma pack(push, 1)
@@ -107,9 +116,10 @@ typedef struct deviceInfo{
 typedef struct Response{
     const char* content;
     ssize_t size;
+    uint16_t message_type;
 } Response; 
 #pragma pack(pop)
- 
+
 
 
 #pragma pack(push, 1)
@@ -119,7 +129,7 @@ typedef struct statePower{
 #pragma pack(pop)
 
 
-
+// placeholder for template 
 typedef struct nullPtr{
 } nullPtr;
 
@@ -155,30 +165,127 @@ typedef struct setColor{
 #pragma pack(pop)
 
 
+enum multiZoneApplicationRequest {NO_APPLY, APPLY, APPLY_ONLY};
 
-uint32_t SOURCE = 12345;     // make random later
+
+#pragma pack(push, 1)
+typedef struct setColorZones{
+    uint8_t start_index;
+    uint8_t end_index;
+    uint16_t hue;
+    uint16_t saturation;
+    uint16_t brightness;
+    uint16_t kelvin;
+    uint32_t duration;
+    uint8_t apply;
+} setColorZones;
+#pragma pack(pop)
+
+
+
+
+#pragma pack(push, 1)
+typedef struct setExtendedColorZones{
+    uint32_t duration;
+    uint8_t apply;
+    uint16_t zone_index;
+    uint8_t color_count;
+    struct HSBK colors[82];
+} setExtendedColorZones;
+#pragma pack(pop)
+
+
+#pragma pack(push, 1)
+typedef struct stateMultiZone{
+    uint8_t zones_count;
+    uint8_t zone_index;
+    struct HSBK colors[8];
+} stateMultiZone;
+#pragma pack(pop)
+
+
+#pragma pack(push, 1)
+typedef struct stateExtendedColorZones{
+    uint16_t zones_count;
+    uint16_t zone_index;
+    uint8_t colors_count;
+    struct HSBK colors[82];
+} stateExtendedColorZones;
+#pragma pack(pop)
+
+
+
+#pragma pack(push, 1)
+typedef struct getColorZones{
+    uint8_t start_index;
+    uint8_t end_index;
+
+} getColorZones;
+#pragma pack(pop)
+
+
+
+#pragma pack(push, 1)
+typedef struct getExtendedColorZones{
+    uint16_t count;
+    uint16_t index;
+    uint8_t zones_count;
+    
+} getExtendedColorZones;
+#pragma pack(pop)
+
+
+
+#pragma pack(push, 1)
+typedef  struct stateZone{
+    uint8_t zone_count;
+    uint8_t index;
+    uint16_t hue;
+    uint16_t saturation;
+    uint16_t brightness;
+    uint16_t kelvin;
+
+} stateZone;
+#pragma pack(pop)
+
+
+
+
+
+uint32_t SOURCE;
 char label[32];              // value returned by StateLabel message
 
 
 
 // lifx messages
-#define GetService 2
+#define GET_SERVICE 2
 #define DEFAULT_LIFX_PORT 56700
 #define BUFFER_SIZE 1024
 #define LIGHT_SET_POWER 117  // either 0 for off or 65535 for on
-#define StatePower 118
-#define GetLabel 23
-#define StateLabel 25
-#define GetVersion 32
-#define StateVersion 33
-#define StateVersionLength 48
+#define STATE_POWER_LIGHT 118 
+#define GET_LABEL 23
+#define STATE_LABEL 25
+#define GET_VERSION 32
+#define STATE_VERSION 33
+#define STATE_VERSION_LENGTH 48
 #define HEADER_SIZE 36
 #define GET_POWER 20
-#define STATE_POWER 22
+#define STATE_POWER_DEVICE 22
 #define GET 101
 #define STATE 107
 #define DEVICE_SET_POWER 21     // uint16 so set the power 
 #define SET_COLOR 102
+#define SET_COLOR_ZONES 501
+#define SET_EXTENDED_COLOR_ZONES 510
+#define STATE_MULTI_ZONE 506
+#define STATE_EXTENDED_COLOR_ZONES 512
+#define GET_COLOR_ZONES 502
+#define GET_EXTENDED_COLOR_ZONES 511
+#define STATE_ZONE 503
+#define STATE_SERVICE 3
+#define SET_COLOR 102
+#define ACKNOWLEDGEMENT 45
+
 
 
 void printHelp();
@@ -196,7 +303,8 @@ bool setColorF(bool broadcast, uint32_t ip, int duration, char* color);
 void printHelp();
 bool setKelvin(bool broadcast, uint32_t ip, int duration, uint16_t kelvin);
 bool convertToUint16(const char* str, uint16_t& result);
-
+bool setColorZonesF(bool braodcast, uint32_t ip, uint32_t duration, char** coloArr);
+std::vector<char*> parseColorList(char* list);
 
 
 
@@ -304,7 +412,7 @@ const deviceInfo lxDevs[] = {
 
 // set address and target of lxDev defore returning  
 template<typename T>
-Response* sendPacket(lx_frame_t* header, T* payload, lxDevice* lxDev) {
+Response* sendPacket(lx_frame_t* header, T* payload, lxDevice* lxDev, std::initializer_list<int> responseTypes) {
 
 
         // create socket 
@@ -376,7 +484,6 @@ Response* sendPacket(lx_frame_t* header, T* payload, lxDevice* lxDev) {
 
 
         Response* resp = new Response();
-        bool included = false;
         while(true) {
             
             ssize_t recv_bytes = recvfrom(sockfd, buffer, BUFFER_SIZE, 0,
@@ -394,24 +501,23 @@ Response* sendPacket(lx_frame_t* header, T* payload, lxDevice* lxDev) {
 
 
             lx_frame_t* response = (lx_frame_t*)buffer;
-            if (response->target != 0 && response->source == SOURCE && (response->reserved_1 != 0 || response->reserved_2 != 0 || response->reserved_3 != 0 || response->reserved_4 != 0 || response->reserved_5 != 0)) {
+            //std::cout << "Response type: " << response->pkt_type << std::endl; ////////////////
+            if (response->sequence == header->sequence && (std::find(responseTypes.begin(), responseTypes.end(), response->pkt_type) != responseTypes.end())) {
 
-                    if (!included) {
-                        lxDev->address = senderAddr.sin_addr;
-                        lxDev->target = response->target;
-                        resp->size = recv_bytes - HEADER_SIZE;
-                        resp->content = new char[resp->size];
-                        memcpy((void*)resp->content, buffer + HEADER_SIZE, resp->size); 
-                        included = true;
-                    }
-            }
+                    lxDev->address = senderAddr.sin_addr;
+                    lxDev->target = response->target;
+                    resp->size = recv_bytes - HEADER_SIZE;
+                    resp->content = new char[resp->size];
+                    resp->message_type = response->pkt_type;
+                    memcpy((void*)resp->content, buffer + HEADER_SIZE, resp->size); 
+                    close(sockfd);
+                    return resp;
+                
+            } 
         }
 
 
-    close(sockfd);
-    if (included) {
-        return resp;
-    }
+    delete(resp->content);
     delete(resp);
     return nullptr;
 
@@ -419,294 +525,11 @@ Response* sendPacket(lx_frame_t* header, T* payload, lxDevice* lxDev) {
 
 
 
-/*
-int main(int argc, char* argv[]) {
-
-    if (isInParams(argc, argv, "-list")) {
-        listDevices();
-        return 0;
-    } else if (isInParams(argc, argv, "-help") || isInParams(argc, argv, "--help") || isInParams(argc, argv, "-h")) {
-    
-        printHelp();
-     
-    } else if (isInParams(argc, argv, "-on")) {
-
-           // add braodcast variable to simplify if statments
-
-        // check for duration and if valid argument
-        int duration = 0;
-        if (isInParams(argc, argv, "-duration")) {
-            char* endptr;
-            char* str = getNextParam(argc, argv, "-duration");
-            int num2 = strtol(str, &endptr, 10);
-            if (endptr != str) {
-                std::cout << "[-] invalid duration value: " << str << std::endl;
-            }
-            duration = num2;
-        }
-
-
-        if (isInParams(argc, argv, "-ip")) {
-
-            char* ipPtr = getNextParam(argc, argv, "-ip");
-            if (ipPtr == nullptr) {
-                std::cout << "[-] invalid ip - EX. -ip 192.168.1.22" << std::endl;
-                return -1;
-            }
-
-            
-            in_addr deviceIp;
-            int result = inet_aton(ipPtr, &deviceIp);
-            if (!result) {
-                std::cout << "[-] IP address invalid" << std::endl;
-                return -1;
-            }
-            uint32_t ip = deviceIp.s_addr;
-
-
-            setPower(false, false, ip, 65535, duration);
-
-        }  else if (isInParams(argc, argv, "-all")) {
-
-            setPower(true, false, 0, 65535, duration);
-
-        }
 
 
 
-    } else if (isInParams(argc, argv, "-off")) {
-
-        // check for duration and if valid argument
-        int duration = 0;
-        if (isInParams(argc, argv, "-duration")) {
-            char* endptr;
-            char* str = getNextParam(argc, argv, "-duration");
-            int num2 = strtol(str, &endptr, 10);
-            if (endptr != str) {
-                std::cout << "[-] invalid duration value: " << str << std::endl;
-            }
-            duration = num2;
-        }
-
-        if (isInParams(argc, argv, "-ip")) {
-
-            char* ipPtr = getNextParam(argc, argv, "-ip");
-            if (ipPtr == nullptr) {
-                std::cout << "[-] invalid ip - EX. -ip 192.168.1.22" << std::endl;
-                return -1;
-            }
-
-            in_addr deviceIp;
-            int result = inet_aton(ipPtr, &deviceIp);
-            if (!result) {
-                std::cout << "[-] IP address invalid" << std::endl;
-                return -1;
-            }
-            uint32_t ip = deviceIp.s_addr;
-
-            bool result7 = setPower(false, false, ip, 0, duration);
 
 
-        }  else if (isInParams(argc, argv, "-all")) {
-
-            setPower(true, false, 0, 0, duration);
-
-        }
-
-
-
-    } else if (isInParams(argc, argv, "-brightness")) {
-
-        // check for duration and if valid argument
-        int duration = 0;
-        if (isInParams(argc, argv, "-duration")) {
-            char* endptr;
-            char* str = getNextParam(argc, argv, "-duration");
-            int num2 = strtol(str, &endptr, 10);
-            if (endptr != str) {
-                std::cout << "[-] invalid duration value: " << str << std::endl;
-                return -1;
-            }
-            duration = num2;
-        }
-
-        // check for brightness and convert it from percent to value out of 65535
-        int brightness = 0;
-        char* result = getNextParam(argc, argv, "-brightness");
-        if (result == nullptr) {
-            std::cout << "[-]/1 invalid brightness, enter desired percent - EX. -brightness 50" << std::endl;
-            return -1;
-        }
-        char* endptr2;
-        int temp = strtol(result, &endptr2, 10);
-        if (*endptr2 != '\0') {
-            std::cout << "[-]/2 invalid brightness, enter desired percent - EX. -brightness 50" << std::endl;
-            return -1;
-        }
-        if (temp > 100) {
-            std::cout << "[-]/3 invalid brightness, value entered " << temp << " shoud be percent so cannot exceed 100" << std::endl;
-            return -1;
-        }
-        
-        float temp2 = static_cast<float>(temp) / 100.0f;
-        brightness = static_cast<int>(65535 * temp2);
-
-        if (isInParams(argc, argv, "-ip")) {
-            char* ipPtr = getNextParam(argc, argv, "-ip");
-            if (ipPtr == nullptr) {
-                std::cout << "[-] invalid ip - EX. -ip 192.168.1.22" << std::endl;
-                return -1;
-            }
-
-            in_addr deviceIp;
-            int result = inet_aton(ipPtr, &deviceIp);
-            if (!result) {
-                std::cout << "[-] IP address invalid" << std::endl;
-                return -1;
-            }
-            uint32_t ip = deviceIp.s_addr;
-
-            setPower(false, true, ip, brightness, duration);
-
-        }  else if (isInParams(argc, argv, "-all")) {
-
-            setPower(true,true, 0, brightness, duration);
-        }
-
-    } else if (isInParams(argc, argv, "-info")) {
-        if (isInParams(argc, argv, "-ip")) {
-
-            char* ipPtr = getNextParam(argc, argv, "-ip");
-            if (ipPtr == nullptr) {
-                std::cout << "[-] invalid ip - EX. -ip 192.168.1.22" << std::endl;
-                return -1;
-            }
-
-            in_addr deviceIp;
-            int result = inet_aton(ipPtr, &deviceIp);
-            if (!result) {
-                std::cout << "[-] IP address invalid" << std::endl;
-                return -1;
-            }
-            uint32_t ip = deviceIp.s_addr;
-
-            printInfo(false, ip);
-
-        }  else if (isInParams(argc, argv, "-all")) {
-
-            printInfo(true, 0);
-         }
-
-    } else if (isInParams(argc, argv, "-color")) {
-
-        // check for duration and if valid argument
-        int duration = 0;
-        if (isInParams(argc, argv, "-duration")) {
-            char* endptr;
-            char* str = getNextParam(argc, argv, "-duration");
-            int num2 = strtol(str, &endptr, 10);
-            if (endptr != str) {
-                std::cout << "[-] invalid duration value: " << str << std::endl;
-                return -1;
-            }
-            duration = num2;
-        }
-        char* color = getNextParam(argc, argv, "-color"); 
-
-        if (isInParams(argc, argv, "-ip")) {
-            
-            char* ipPtr = getNextParam(argc, argv, "-ip");
-            if (ipPtr == nullptr) {
-                std::cout << "[-] invalid ip - EX. -ip 192.168.1.22" << std::endl;
-                return -1;
-            }
-            
-            in_addr deviceIp;
-            int result = inet_aton(ipPtr, &deviceIp);
-            if (!result) {
-                std::cout << "[-] IP address invalid" << std::endl;
-                return -1;
-            }
-            uint32_t ip = deviceIp.s_addr;
-
-            setColorF(false, ip, duration, color);
-
-        }  else if (isInParams(argc, argv, "-all")) {
-
-            setColorF(true, 0, duration, color);
-         }
-    } else if (isInParams(argc, argv, "-warmth")) {
-
-    
-        // check for duration and if valid argument
-        int duration = 0;
-        if (isInParams(argc, argv, "-duration")) {
-            char* endptr;
-            char* str = getNextParam(argc, argv, "-duration");
-            int num2 = strtol(str, &endptr, 10);
-            if (endptr != str) {
-                std::cout << "[-] invalid duration value: " << str << std::endl;
-                return -1;
-            }
-            duration = num2;
-        }
-
-
-
-        char* str2 = getNextParam(argc, argv, "-warmth");
-        if (str2 == nullptr) {
-            std::cout << "[-] Invalid warmth value, use -help for instructions" << std::endl;
-        }            
-
-        uint16_t kelvin;
-        bool result4;
-        try {
-            result4 = convertToUint16(str2, kelvin);
-        } catch (const std::range_error& e) {
-            std::cerr << "Error: " << e.what() << std::endl;
-            std::cout << "[-] Invalid warmth value: " << str2 << "     - (main/warmth)" << std::endl;
-            return -1;
-        }
-        if (kelvin < 2500 || kelvin > 9000) {
-            std::cout << "Warmth value " << kelvin << " out of range, must be between 2500 to 9000" << std::endl;
-            return -1;
-        }
-
-
-
-        if (isInParams(argc, argv, "-ip")) {
-            
-            char* ipPtr = getNextParam(argc, argv, "-ip");
-            if (ipPtr == nullptr) {
-                std::cout << "[-] invalid ip - EX. -ip 192.168.1.22" << std::endl;
-                return -1;
-            }
-            
-            in_addr deviceIp;
-            int result = inet_aton(ipPtr, &deviceIp);
-            if (!result) {
-                std::cout << "[-] IP address invalid" << std::endl;
-                return -1;
-            }
-            uint32_t ip = deviceIp.s_addr;
- 
-        
-            
-            setKelvin(false, ip, duration, kelvin);
-        
-        } else if (isInParams(argc, argv, "-all")) {
-
-            setKelvin(true, 0, duration, kelvin);
-            }
-
-
-    } else {
-        std::cout << "[-] Input not recognized as valid, use -help for instructions" << std::endl;
-    }
-
-}
-// bool setKelvin(bool broadcast, uint32_t ip, int duration, uint16_t kelvin);
-*/
 
 
 
@@ -759,7 +582,7 @@ std::vector<in_addr> getAllDevices() {
         curr.addressable = 1;
         curr.tagged = 1;
         curr.source = SOURCE;
-        curr.pkt_type = GetService;
+        curr.pkt_type = GET_SERVICE;
 
 
         // send boradcast getService message
@@ -778,7 +601,7 @@ std::vector<in_addr> getAllDevices() {
 
         // Set socket to non-blocking so we can stop listening after some time
         struct timeval tv;
-        tv.tv_sec = 2;  // Wait for 2 seconds
+        tv.tv_sec = 1;  // Wait for 2 seconds
         tv.tv_usec = 0;
         setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
@@ -805,7 +628,6 @@ std::vector<in_addr> getAllDevices() {
                     devAddrs.push_back(senderAddr.sin_addr);
                     continue;
                 } 
-
                 for (int i = 0; i < devAddrs.size(); i++) {
                     if (senderAddr.sin_addr.s_addr == devAddrs[i].s_addr) {
                         included = true;
@@ -832,58 +654,66 @@ std::vector<in_addr> getAllDevices() {
 
 bool listDevices() {
 
-    
     std::vector<in_addr> addrs = getAllDevices();
     if (addrs.size() == 0) {
         std::cout << "No lifx devices found on your network" << std::endl;
         return false;
     }
     
-
-    lx_frame_t* header = new lx_frame_t;
-    lxDevice* device = new lxDevice();
+    lx_frame_t header = {};
+    lxDevice device = {};
     for (int i = 0; i < addrs.size(); i++) {
 
         // create header to send getService packet
-        header->protocol = 1024;
-        header->addressable = 1;
-        header->pkt_type = GetService;
-        header->source = SOURCE;
-        header->sequence = 0;
-        header->size = HEADER_SIZE;
-        device->address = addrs[i];
-        device->port = htons(DEFAULT_LIFX_PORT);
+        header.protocol = 1024;
+        header.addressable = 1;
+        header.pkt_type = GET_SERVICE;
+        header.source = SOURCE;
+        header.sequence = 0;
+        header.size = HEADER_SIZE;
+        device.address = addrs[i];
+        device.port = htons(DEFAULT_LIFX_PORT);
 
 
         // send and recieve getService packet
-        Response* resp = sendPacket<nullPtr>(header, nullptr, device);                                                     
+        Response* resp = sendPacket<nullPtr>(&header, nullptr, &device, {STATE_SERVICE});                                                     
         if (resp == nullptr) {
             std::cout << "No response from device to getService" << std::endl;                                                  // shoudl probably try a couple more times before giving up
             return false;
         }      
         stateService* sS = const_cast<stateService*>(reinterpret_cast< const stateService*>(resp->content));
-        device->port = htons(sS->port);
+        delete(resp->content);
+        delete(resp);
+        device.port = htons(sS->port);
+        header.sequence++;
+
 
         // prepare, send, and recive getVersion packet
-        header->pkt_type = GetVersion;
-        header->sequence += 1;
-        Response* resp2 = sendPacket<nullPtr>(header, nullptr, device);                                                        
+        header.pkt_type = GET_VERSION;
+        Response* resp2 = sendPacket<nullPtr>(&header, nullptr, &device, {STATE_VERSION});                                                        
         if (resp2 == nullptr) {
             std::cout << "No response from device to getVersion" << std::endl;                                                  // shoudl probably try a couple more times before giving up
             return false;
         }
         stateVersion* sV = const_cast<stateVersion*>(reinterpret_cast<const stateVersion*>(resp2->content));
+        delete(resp2->content);
+        delete(resp2);
+        header.sequence++;
+    
 
         // prepare, send, and recive getPower packet
-        header->pkt_type = GET_POWER;
-        header->sequence += 1;
-        Response* resp3 = sendPacket<nullPtr>(header, nullptr, device);                                             
+        header.pkt_type = GET_POWER;
+        Response* resp3 = sendPacket<nullPtr>(&header, nullptr, &device, {STATE_POWER_DEVICE});                           
+
         if (resp3 == nullptr) {
             std::cout << "No response from device to getPower" << std::endl;                                                  // shoudl probably try a couple more times before giving up
             return false;
         }
         statePower* sP = const_cast<statePower*>(reinterpret_cast<const statePower*>(resp3->content));
-        
+        delete(resp3->content);
+        delete(resp3);
+
+
         // prepare to print formatted output
         int deviceTypeWidth = 26;
         int ipAddressWidth = 14;
@@ -903,15 +733,13 @@ bool listDevices() {
         
 
 
-        std::cout << "| " << std::setw(deviceTypeWidth) << std::left << devInfo->name << " | " << std::setw(ipAddressWidth) << std::left << inet_ntoa(device->address) << " | " << std::setw(macAddressWidth) << std::left << uint64ToMac(device->target) << " | " << std::setw(statusWidth) << std::left << status << " |" << std::endl;
+        std::cout << "| " << std::setw(deviceTypeWidth) << std::left << devInfo->name << " | " << std::setw(ipAddressWidth) << std::left << inet_ntoa(device.address) << " | " << std::setw(macAddressWidth) << std::left << uint64ToMac(device.target) << " | " << std::setw(statusWidth) << std::left << status << " |" << std::endl;
 
         // zero out header and device
         memset(&header, 0, sizeof(header));
         memset(&device, 0, sizeof(device));
 
     }
-    delete(header);
-    delete(device);
     return 0;
 
 }
@@ -963,9 +791,7 @@ bool isInParams(int count, char** params, std::string test) {
             return true;    
         }
     }
-
     return false;
-
 }
 
 
@@ -979,7 +805,6 @@ char* getNextParam(int count, char** params, std::string test) {
         }
     }
     return nullptr;
-
 }
 
 
@@ -988,92 +813,106 @@ char* getNextParam(int count, char** params, std::string test) {
 // level = 0 for off, 65535 for on and anything else is its brightness
 bool setPower(bool broadcast, bool brightness, uint32_t ip, int level, int duration) {
 
-    lxDevice* device = new lxDevice();
-    lx_frame_t* header = new lx_frame_t();
+    lxDevice device = {};
+    lx_frame_t header = {};
 
     std::vector<in_addr> addrs;
     if (broadcast) {
         addrs = getAllDevices();
     } else {
-        in_addr* addr = new in_addr();
-        addr->s_addr = ip;
-        addrs.push_back(*addr);
+        in_addr addr = {};
+        addr.s_addr = ip;
+        addrs.push_back(addr);
     }
 
     for (int i = 0; i < addrs.size(); i++) {
 
-        header->protocol = 1024;
-        header->addressable = 1;
-        header->source = SOURCE;
-        header->sequence = 0;
-        header->size = HEADER_SIZE;
-        header->pkt_type = GetService;
-        device->address.s_addr = addrs[i].s_addr;
-        device->port = htons(DEFAULT_LIFX_PORT);
+        header.protocol = 1024;
+        header.addressable = 1;
+        header.source = SOURCE;
+        header.sequence = 0;
+        header.size = HEADER_SIZE;
+        header.pkt_type = GET_SERVICE;
+        device.address.s_addr = addrs[i].s_addr;
+        device.port = htons(DEFAULT_LIFX_PORT);
        
 
         // send and recieve getService packet
-        Response* resp0 = sendPacket<nullPtr>(header, nullptr, device);                                                     
+        Response* resp0 = sendPacket<nullPtr>(&header, nullptr, &device, {STATE_SERVICE});                                                     
         if (resp0 == nullptr) {
             std::cout << "[-] No response from device to getService - (setPow/2)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
             return false;
         }      
         stateService* sS = const_cast<stateService*>(reinterpret_cast< const stateService*>(resp0->content));
-        device->port = htons(sS->port);
-        header->sequence++;
-        //header->ack_required = 1;
+        device.port = htons(sS->port);
+        header.sequence++;
+
 
         if (!brightness && (level == 0 || level == 65535)) {
 
-            setLightPower* setPow = new setLightPower();
-            setPow->duration = duration;
-            header->pkt_type = 117;
+            setLightPower setPow = {};
+            setPow.duration = duration;
+            header.pkt_type = 117;
             if (level == 0) {
-                setPow->level = 0;
+                setPow.level = 0;
             } else {
-                setPow->level = 65535;
+                setPow.level = 65535;
             }
            
-            header->ack_required = 1; 
-            device->address = addrs[i];          
-            Response* resp = sendPacket<setLightPower>(header, setPow, device);
+            // prepare, send, and recieve setLightPower packet
+            header.ack_required = 1; 
+            device.address = addrs[i];          
+            Response* resp = sendPacket<setLightPower>(&header, &setPow, &device, {STATE_POWER_LIGHT, ACKNOWLEDGEMENT});
             if (resp == nullptr) {
                 std::cout << "[-] No response to setPower packet - setPow/4" << std::endl;
                 return false;
             }
+            delete(resp->content);
+            delete(resp);
+            delete(resp0->content);
+            delete(resp0);
         } else if (brightness) {
 
-            // prepare, send, and recive get packet (for HSBK)
-            header->pkt_type = GET;
-            Response* resp = sendPacket<nullPtr>(header, nullptr, device);
+            // prepare, send, and recive a Get packet (for HSBK)
+            header.pkt_type = GET;
+            Response* resp = sendPacket<nullPtr>(&header, nullptr, &device, {STATE});
             if (resp == nullptr) {
                 std::cout << "[-] No response from device to Get packet - (setPower)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
                 return false;
             }
             state* s = const_cast<state*>(reinterpret_cast<const state*>(resp->content));
 
-            // prepare, senda nd recieve setColor packet
-            setColor* setCol = new setColor();
-            setCol->duration = duration;
-            setCol->color = s->color;
-            setCol->color.brightness = level;
-            setCol->reserved = 0;
-            header->pkt_type = 102; 
-            header->ack_required = 1;
 
-            Response* resp2 = sendPacket<setColor>(header, setCol, device);
+
+            // prepare, send and recieve setColor packet
+            setColor setCol = {};
+            setCol.duration = duration;
+            setCol.color = s->color;
+            setCol.color.brightness = level;
+            setCol.reserved = 0;
+            header.pkt_type = SET_COLOR; 
+            header.ack_required = 1;
+
+            Response* resp2 = sendPacket<setColor>(&header, &setCol, &device, {STATE, ACKNOWLEDGEMENT});
             if (resp2 == nullptr) {
                 std::cout << "[-] No response to setColor packet - setPow/5" << std::endl;
                 return false;
             }
+            
+            delete(resp2->content);
+            delete(resp2);
+            delete(resp->content);
+            delete(resp);
             
         } else {
             std::cout << "[-] Invalid level argument - (setPower)/6" << std::endl;
             return false;
         }
 
-        memset(device, 0, sizeof(*device));
+        memset(&header, 0, sizeof(header));
+        memset(&device, 0, sizeof(device));
     }
+
 
     return true;
 }
@@ -1082,8 +921,8 @@ bool setPower(bool broadcast, bool brightness, uint32_t ip, int level, int durat
 
 bool printInfo(bool broadcast, uint32_t ip) {
 
-    lx_frame_t* header = new lx_frame_t(); 
-    lxDevice* device = new lxDevice();
+    lx_frame_t header = {}; 
+    lxDevice device = {};
 
     std::vector<in_addr> addrs;
     in_addr addr;
@@ -1096,44 +935,46 @@ bool printInfo(bool broadcast, uint32_t ip) {
 
     for (int i = 0; i < addrs.size(); i++) {
 
-        header->protocol = 1024;
-        header->addressable = 1;
-        header->source = SOURCE;
-        header->sequence = 0;
-        header->size = HEADER_SIZE;
-        device->address.s_addr = addrs[i].s_addr;
-        header->pkt_type = GetService;
-        device->port = htons(DEFAULT_LIFX_PORT);
+        header.protocol = 1024;
+        header.addressable = 1;
+        header.source = SOURCE;
+        header.sequence = 0;
+        header.size = HEADER_SIZE;
+        device.address.s_addr = addrs[i].s_addr;
+        header.pkt_type = GET_SERVICE;
+        device.port = htons(DEFAULT_LIFX_PORT);
 
         // send and recieve getService packet
-        Response* resp = sendPacket<nullPtr>(header, nullptr, device);                                                     
+        Response* resp = sendPacket<nullPtr>(&header, nullptr, &device, {STATE_SERVICE});                                                     
         if (resp == nullptr) {
             std::cout << "[-] No response from device to getService - (printInfo)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
             return false;
         }      
         stateService* sS = const_cast<stateService*>(reinterpret_cast< const stateService*>(resp->content));
-        device->port = htons(sS->port);
-        header->sequence++;
+        device.port = htons(sS->port);
+        header.sequence++;
 
         // send and recieve getVersion packet
-        header->pkt_type = GetVersion;
-        Response* resp2 = sendPacket<nullPtr>(header, nullptr, device);                                                        
+        header.pkt_type = GET_VERSION;
+        Response* resp2 = sendPacket<nullPtr>(&header, nullptr, &device, {STATE_VERSION});                                                        
         if (resp2 == nullptr) {
             std::cout << "[-] No response from device to getVersion - (printInfo)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
             return false;
         }
         stateVersion* sV = const_cast<stateVersion*>(reinterpret_cast<const stateVersion*>(resp2->content));
         const deviceInfo* devInfo = getDeviceInfo(sV->product); 
-        header->sequence++;
+        header.sequence++;
 
         // prepare, send, and recive get packet (for label)
-        header->pkt_type = GET;
-        Response* resp4 = sendPacket<nullPtr>(header, nullptr, device);
+        header.pkt_type = GET;
+        Response* resp4 = sendPacket<nullPtr>(&header, nullptr, &device, {STATE});
         if (resp4 == nullptr) {
             std::cout << "[-] No response from device to Get packet - (printInfo)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
             return false;
         }
         state* s = const_cast<state*>(reinterpret_cast<const state*>(resp4->content));
+
+
 
         std::cout << "--------------------------------------------" << std::endl;
         std::cout << "-------------   Print Info    --------------" << std::endl;
@@ -1160,11 +1001,17 @@ bool printInfo(bool broadcast, uint32_t ip) {
 
         std::cout << "\n\n----- Device Details" << std::endl;
         std::cout << "  Device Label: " << s->label << std::endl;
-        std::cout << "  Device Address: " << inet_ntoa(device->address) << std::endl;
-        std::cout << "  Device Port: " << htons(device->port) << std::endl;
+        std::cout << "  Device Address: " << inet_ntoa(device.address) << std::endl;
+        std::cout << "  Device Port: " << htons(device.port) << std::endl;
         
-        memset(header, 0, sizeof(header));
-        memset(device, 0, sizeof(device));
+        memset(&header, 0, sizeof(header));
+        memset(&device, 0, sizeof(device));
+        delete(resp->content);
+        delete(resp);
+        delete(resp2->content);
+        delete(resp2);
+        delete(resp4->content);
+        delete(resp4);
 
     }
     return true;
@@ -1269,9 +1116,9 @@ HSBK* toHS(char* HEXORRGB) {
 
 bool setColorF(bool broadcast, uint32_t ip, int duration, char* color) {
 
-    lx_frame_t* header = new lx_frame_t();
-    lxDevice* device = new lxDevice();
-    setColor* setCol = new setColor();
+    lx_frame_t header = {};
+    lxDevice device = {};
+    setColor setCol = {};
     HSBK* hsbk = toHS(color);
     if (hsbk == nullptr) {
         std::cout << "toHS failed - (setColor)" << std::endl;
@@ -1282,67 +1129,75 @@ bool setColorF(bool broadcast, uint32_t ip, int duration, char* color) {
     if (broadcast) {
         addrs = getAllDevices();
     } else {
-        in_addr* addr = new in_addr();
-        addr->s_addr = ip;
-        addrs.push_back(*addr);
+        //in_addr* addr = new in_addr();
+        in_addr addr = {};
+        addr.s_addr = ip;
+        addrs.push_back(addr);
     }
 
     for (int i = 0; i < addrs.size(); i++) {
 
-        header->protocol = 1024;
-        header->addressable = 1;
-        header->source = SOURCE;
-        header->sequence = 0;
-        header->size = HEADER_SIZE;
+        header.protocol = 1024;
+        header.addressable = 1;
+        header.source = SOURCE;
+        header.sequence = 0;
+        header.size = HEADER_SIZE;
  
-        header->pkt_type = GetService;
-        device->address = addrs[i];                        
-        device->port = htons(DEFAULT_LIFX_PORT);
+        header.pkt_type = GET_SERVICE;
+        device.address = addrs[i];                        
+        device.port = htons(DEFAULT_LIFX_PORT);
 
         // send and recieve getService packet
-        Response* resp0 = sendPacket<nullPtr>(header, nullptr, device);                                                     
+        Response* resp0 = sendPacket<nullPtr>(&header, nullptr, &device, {STATE_SERVICE});                                                     
         if (resp0 == nullptr) {
             std::cout << "[-] No response from device to getService - (setColor)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
             return false;
         }      
         stateService* sS = const_cast<stateService*>(reinterpret_cast< const stateService*>(resp0->content));
-        device->port = htons(sS->port);
-        header->sequence++;
-        //header->ack_required = 1;
+        device.port = htons(sS->port);
+        header.sequence++;
 
 
         // prepare, send, and recive get packet (for label)
-        header->pkt_type = GET;
-        Response* resp4 = sendPacket<nullPtr>(header, nullptr, device);
-        if (resp4 == nullptr) {
+        header.pkt_type = GET;
+        Response* resp1 = sendPacket<nullPtr>(&header, nullptr, &device, {STATE});
+        if (resp1 == nullptr) {
             std::cout << "[-] No response from device to Get packet - (setcolor)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
             return false;
         }
-        state* s = const_cast<state*>(reinterpret_cast<const state*>(resp4->content));
-        header->sequence++;
+        state* s = const_cast<state*>(reinterpret_cast<const state*>(resp1->content));
+        header.sequence++;
+
 
         // prepare, send, and recieve setColor
-        header->pkt_type = SET_COLOR;
+        header.pkt_type = SET_COLOR;
         hsbk->kelvin = s->color.kelvin;
         hsbk->brightness = s->color.brightness;
-        setCol->color.hue = hsbk->hue;        
-        setCol->color.saturation = hsbk->saturation;        
-        setCol->color.brightness = hsbk->brightness;        
-        setCol->color.kelvin = hsbk->kelvin;        
-        setCol->duration = duration;
+        setCol.color.hue = hsbk->hue;        
+        setCol.color.saturation = hsbk->saturation;        
+        setCol.color.brightness = hsbk->brightness;        
+        setCol.color.kelvin = hsbk->kelvin;        
+        setCol.duration = duration;
 
-        header->ack_required = 1;
-        Response* resp3 = sendPacket<setColor>(header, setCol, device);
-        if (resp3 == nullptr) {
-            std::cout << "[-]/2 No response from device to Get packet - (setcolor)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
+        header.ack_required = 1;
+        Response* resp2 = sendPacket<setColor>(&header, &setCol, &device, {STATE, ACKNOWLEDGEMENT});
+        if (resp2 == nullptr) {
+            std::cout << "[-]/2 No response from device to setColor packet - (setcolor)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
             return false;
         }
-        state* s2 = const_cast<state*>(reinterpret_cast<const state*>(resp3->content));
-        header->sequence++;
+        state* s2 = const_cast<state*>(reinterpret_cast<const state*>(resp2->content));
+        delete(resp2->content);
+        delete(resp2);
+        header.sequence++;
     
-        memset(header, 0, sizeof(header));
-        memset(device, 0, sizeof(device));
+        delete(resp0->content);
+        delete(resp0);
+        delete(resp1->content);
+        delete(resp1);
+        memset(&header, 0, sizeof(header));
+        memset(&device, 0, sizeof(device));
     }
+    delete(hsbk);
     return true; 
 }
 
@@ -1361,20 +1216,22 @@ void printHelp() {
     std::cout << "---- Command flags" << std::endl;
     std::cout << "   -on" << std::endl;
     std::cout << "   -off" << std::endl;
-    std::cout << "   -color {rgb or hex}                ex. -color 0xffffff   or -color (rrr,ggg,bbb)" << std::endl;
-    std::cout << "   -list                              lists all devices on netowrk" << std::endl;
-    std::cout << "   -info                              provides verbose details about selected device(s)" << std::endl;
-    std::cout << "   -brightness {percent}              ex. -brightness 50" << std::endl;
-    std::cout << "   -warmth {kelvin}                   kelvin: range 2500(warm) to  9000(cool) " << std::endl;
+    std::cout << "   -color {rgb or hex}                    ex. -color 0xffffff   or -color (rrr,ggg,bbb)" << std::endl;
+    std::cout << "   -list                                  lists all devices on netowrk" << std::endl;
+    std::cout << "   -info                                  provides verbose details about selected device(s)" << std::endl;
+    std::cout << "   -brightness {percent}                  ex. -brightness 50" << std::endl;
+    std::cout << "   -warmth {kelvin}                       kelvin: range 2500(warm) to  9000(cool) " << std::endl;
+    std::cout << "   -multiColor {\"{list of hex or rgb}\"}       ex. -multiColor \"{0x46b34c, 0xf09f3d, 0x3debf0}\" " << std::endl;
+    
     std::cout << std::endl;
 
     std::cout << "---- Select flags" << std::endl;
-    std::cout << "   -ip {ipv4}                         ex. -ip 192.168.8.141" << std::endl;
-    std::cout << "   -all                               apply command to all devices on your network" << std::endl;
+    std::cout << "   -ip {ipv4}                             ex. -ip 192.168.8.141" << std::endl;
+    std::cout << "   -all                                   apply command to all devices on your network" << std::endl;
     std::cout << std::endl;
 
     std::cout << "---- Optinal flags" << std::endl;
-    std::cout << "   -duration {time in ms}             ex. -duration 100" << std::endl;
+    std::cout << "   -duration {time in ms}                 ex. -duration 100" << std::endl;
     std::cout << "\n" << std::endl;
 
 
@@ -1392,72 +1249,83 @@ void printHelp() {
 // Kelvin: range 2500° (warm) to 9000° (cool)
 // set staturation to 0 to get rid of color
 bool setKelvin(bool broadcast, uint32_t ip, int duration, uint16_t kelvin) {
-    lx_frame_t* header = new lx_frame_t();
-    lxDevice* device = new lxDevice();
-    setColor* setCol = new setColor();
+    lx_frame_t header = {};
+    lxDevice device = {};
+    setColor setCol = {};
  
     std::vector<in_addr> addrs;
     if (broadcast) {
         addrs = getAllDevices();
     } else {
-        in_addr* addr = new in_addr();
-        addr->s_addr = ip;
-        addrs.push_back(*addr);
+        in_addr addr = {};
+        addr.s_addr = ip;
+        addrs.push_back(addr);
     }
 
     for (int i = 0; i < addrs.size(); i++) {
 
-        header->protocol = 1024;
-        header->addressable = 1;
-        header->source = SOURCE;
-        header->sequence = 0;
-        header->size = HEADER_SIZE;
-        header->pkt_type = GetService;
-        device->address = addrs[i];                        
-        device->port = htons(DEFAULT_LIFX_PORT);
+        header.protocol = 1024;
+        header.addressable = 1;
+        header.source = SOURCE;
+        header.sequence = 0;
+        header.size = HEADER_SIZE;
+        header.pkt_type = GET_SERVICE;
+        device.address = addrs[i];                        
+        device.port = htons(DEFAULT_LIFX_PORT);
 
         // send and recieve getService packet
-        Response* resp0 = sendPacket<nullPtr>(header, nullptr, device);                                                     
+        Response* resp0 = sendPacket<nullPtr>(&header, nullptr, &device, {STATE_SERVICE});                                                     
         if (resp0 == nullptr) {
             std::cout << "[-] No response from device to getService - (setKelvin)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
             return false;
         }      
         stateService* sS = const_cast<stateService*>(reinterpret_cast< const stateService*>(resp0->content));
-        device->port = htons(sS->port);
-        header->sequence++;
+        device.port = htons(sS->port);
+        header.sequence++;
     
 
 
         // prepare, send, and recive get packet (for label)
-        header->pkt_type = GET;
-        Response* resp4 = sendPacket<nullPtr>(header, nullptr, device);
+        header.pkt_type = GET;
+        Response* resp4 = sendPacket<nullPtr>(&header, nullptr, &device, {STATE});
         if (resp4 == nullptr) {
             std::cout << "[-] No response from device to Get packet - (setKelvin)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
             return false;
         }
         state* s = const_cast<state*>(reinterpret_cast<const state*>(resp4->content));
-        header->sequence++;
+        header.sequence++;
 
 
-        header->pkt_type = SET_COLOR;
-        setCol->color.saturation = 0;
-        setCol->color.hue = s->color.hue;
-        setCol->color.brightness = s->color.brightness;
-        setCol->color.kelvin = kelvin;
-        setCol->duration = duration;
+
+        // prespare, send, and recive SetColor packet
+        header.pkt_type = SET_COLOR;
+        setCol.color.saturation = 0;
+        setCol.color.hue = s->color.hue;
+        setCol.color.brightness = s->color.brightness;
+        setCol.color.kelvin = kelvin;
+        setCol.duration = duration;
 
         
-        header->ack_required = 1;
-        Response* resp3 = sendPacket<setColor>(header, setCol, device);
+        header.ack_required = 1;
+        Response* resp3 = sendPacket<setColor>(&header, &setCol, &device, {STATE, ACKNOWLEDGEMENT});
         if (resp3 == nullptr) {
-            std::cout << "[-]/2 No response from device to Get packet - (setKelvin)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
+            std::cout << "[-]/2 No response from device to setColor packet - (setKelvin)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
             return false;
         }
         state* s2 = const_cast<state*>(reinterpret_cast<const state*>(resp3->content));
-        header->sequence++;
-    
-        memset(header, 0, sizeof(header));
-        memset(device, 0, sizeof(device));
+        header.sequence++;
+   
+        delete(resp0->content);
+        delete(resp0);
+        delete(resp4->content);
+        delete(resp4);
+        delete(resp3->content);
+        delete(resp3);
+
+
+ 
+        memset(&header, 0, sizeof(header));
+        memset(&device, 0, sizeof(device));
     }
     return true;  
 }
@@ -1526,6 +1394,355 @@ bool charToUint32(const char* str, uint32_t& result) {
 
 
 
+// didnt work first time, then did after adding prints
+// takes an array of hex values and randomy sets zones to one of the colors.
+bool setColorZonesF(bool braodcast, uint32_t ip, uint32_t duration, std::vector<char*> colorVec) {
+    
+    lx_frame_t header = {};
+    lxDevice device = {};
+    std::vector<in_addr> addrs;
+    if (braodcast) {
+        addrs = getAllDevices();
+    } else {
+        in_addr addr = {};
+        addr.s_addr = ip;
+        addrs.push_back(addr); 
+    }
+
+
+
+
+
+    for (int i = 0; i < addrs.size(); i++) {
+ 
+        header.protocol = 1024;
+        header.addressable = 1;
+        header.source = SOURCE;
+        header.sequence = 0;
+        header.size = HEADER_SIZE;
+ 
+        header.pkt_type = GET_SERVICE;
+        device.address = addrs[i];                        
+        device.port = htons(DEFAULT_LIFX_PORT);
+
+
+        // send and recieve getService packet
+        Response* resp0 = sendPacket<nullPtr>(&header, nullptr, &device, {STATE_SERVICE});                                                     
+        if (resp0 == nullptr) {
+            std::cout << "[-] No response from device to getService - (setColorZonesF)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
+            return false;
+        }      
+        stateService* sS = const_cast<stateService*>(reinterpret_cast< const stateService*>(resp0->content));
+        device.port = htons(sS->port);
+        header.sequence++;
+
+
+        // prepare, send, and recive getVersion packet
+        header.pkt_type = GET_VERSION;
+        Response* resp2 = sendPacket<nullPtr>(&header, nullptr, &device, {STATE_VERSION});                                                 
+        if (resp2 == nullptr) {
+            std::cout << "No response from device to getVersion - (setColorZonesF)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
+            return false;
+        }
+        stateVersion* sV = const_cast<stateVersion*>(reinterpret_cast<const stateVersion*>(resp2->content));
+        header.sequence++;
+       
+
+ 
+        const deviceInfo* devInfo = getDeviceInfo(sV->product); 
+        if (strcmp(devInfo->zones, "Extended Linear") == 0) {
+        
+            // prepare, send, and recive getExtendedColorZOnes packet
+            getExtendedColorZones* getEColZon = new getExtendedColorZones(); 
+            uint16_t brightness = 0;
+            header.pkt_type = GET_EXTENDED_COLOR_ZONES;
+            Response* resp3 = sendPacket<nullPtr>(&header, nullptr, &device, {STATE_EXTENDED_COLOR_ZONES});                                              
+            if (resp3 == nullptr) {
+                std::cout << "No response from device to getExtendedColorZones - (setColorZonesF)" << std::endl;                                                                // shoudl probably try a couple more times before giving up
+                return false;
+            } 
+            stateExtendedColorZones* sECZ = const_cast<stateExtendedColorZones*>(reinterpret_cast<const stateExtendedColorZones*>(resp3->content));
+            header.sequence++;
+            brightness = sECZ->colors[0].brightness;
+            int numZones = sECZ->zones_count;
+
+
+            // convert from hex or rgb to hsbk
+            std::vector<HSBK*> hsbVec;
+            for (auto hex : colorVec) {
+                HSBK* hsb = toHS(hex);
+                hsbVec.push_back(hsb);
+            }   
+            
+            // break up total zones into segments
+            int colorSize = 82;
+
+            int numSegments = 2*hsbVec.size(); 
+            if (numSegments > numZones) numSegments = numZones;
+        
+            int segmentSize= numZones / numSegments;    // arbitrarily breaking zones into segments
+            uint8_t remainder = static_cast<uint8_t>(numZones % numSegments);
+            int numMessages = ceil((double)numZones / colorSize);
+            
+
+
+                // generate random number
+                std::random_device rd; 
+                std::mt19937 gen(rd()); 
+                std::uniform_int_distribution<> distr(0, (hsbVec.size() - 1)); 
+                int randIndex = distr(gen);
+
+
+
+                // loops though all zones, broken up into multiple mesages if more than 82
+                setExtendedColorZones setEColZon = {};
+                int numZonesLeft = numZones;
+                setEColZon.color_count = numZones;
+                for (int v = 0; v < numMessages; v++) {
+
+                    setEColZon.duration = duration;
+                    setEColZon.zone_index = v * colorSize;
+
+                    for (int x = 0; x < numZonesLeft; x++) {
+                        
+
+                        if (x % segmentSize == 0) { // next color
+                            randIndex = distr(gen);
+                        }
+
+                        setEColZon.colors[x + (v * colorSize)].hue = hsbVec[randIndex]->hue;
+                        setEColZon.colors[x + (v * colorSize)].saturation = hsbVec[randIndex]->saturation;
+                        setEColZon.colors[x + (v * colorSize)].brightness = brightness;
+                        setEColZon.colors[x + (v * colorSize)].kelvin = hsbVec[randIndex]->kelvin;
+                        
+
+                        // if last zone, or reached max zones for 1 message
+                        if (x == (numZonesLeft - 1) || x == (colorSize - 1)) {
+                            ((v + 1) == numMessages) ? setEColZon.apply = APPLY : setEColZon.apply = NO_APPLY;
+
+                            // prepare, send, and recive getVersion packet
+                            header.ack_required = 1;
+                            header.pkt_type = SET_EXTENDED_COLOR_ZONES;
+                            Response* resp4 = sendPacket<setExtendedColorZones>(&header, &setEColZon, &device, {STATE_EXTENDED_COLOR_ZONES, ACKNOWLEDGEMENT});                                                        
+                            if (resp4 == nullptr ) {
+                                std::cout << "No response from device to setExtendedColorZones - (setColorZonesF)" << std::endl;                                                                // shoudl probably try a couple more times before giving up
+                                return false;
+                            } 
+                            //stateExtendedColorZones* sECZ2 = const_cast<stateExtendedColorZones*>(reinterpret_cast<const stateExtendedColorZones*>(resp4->content));
+
+                            delete(resp4->content);
+                            delete(resp4);
+                            break;
+                        } 
+
+                    }
+
+                    memset(&setEColZon, 0, sizeof(setEColZon));
+                    numZonesLeft = numZones - colorSize;
+                }
+            
+        for (HSBK* hsb: hsbVec) {
+            delete(hsb);
+        }
+
+        delete(resp0->content);
+        delete(resp0);
+        delete(resp2->content);
+        delete(resp2);
+        delete(resp3->content);
+        delete(resp3);
+        } else if (strcmp(devInfo->zones, "Linear") == 0) {
+    
+            int numZones = 0;
+
+
+            // get how many color zones there are
+            getColorZones gColZones = {};
+            gColZones.start_index = 0;
+            gColZones.end_index = 255;
+
+
+
+
+            // prepare, send, and recive getColorZones packet
+            header.pkt_type = GET_COLOR_ZONES;
+            Response* resp3 = sendPacket<getColorZones>(&header, &gColZones, &device, {STATE_ZONE, STATE_MULTI_ZONE});                                                         
+            uint16_t brightness = 0; 
+            if (resp3 == nullptr) {
+                std::cout << "No response from device to getColorZones - (setColorZonesF)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
+                return false;
+            }
+
+            // get ZoneCount and brightness to use alter
+            if (resp3->message_type = STATE_ZONE) {  // only 1 zone
+                stateZone* sZ = const_cast<stateZone*>(reinterpret_cast<const stateZone*>(resp3->content));
+                numZones = sZ->zone_count;
+                brightness = sZ->brightness;
+
+
+            } else if (resp3->message_type == STATE_MULTI_ZONE) {
+                stateMultiZone* sMZ = const_cast<stateMultiZone*>(reinterpret_cast<const stateMultiZone*>(resp3->content));
+                numZones = sMZ->zones_count;
+                brightness = sMZ->colors[0].brightness;
+
+
+            } else {
+                std::cout << "[-] unexpected response from getColorZones - (setColorZonesF) " << std::endl;
+                return false;
+            }
+            header.sequence++;
+            
+
+    
+            // convert from hex or rgb to hsbk
+            std::vector<HSBK*> hsbVec;
+            for (auto hex : colorVec) {
+                HSBK* hsb = toHS(hex);
+                hsbVec.push_back(hsb);
+            }   
+
+
+
+            // break up zones
+
+            int numSegments = 2*hsbVec.size(); 
+            if (numSegments > numZones) numSegments = numZones;
+            int segmentSize= numZones / numSegments;    // arbitrarily breaking zones into segments
+            int remainder = numZones % numSegments;
+
+            
+
+
+
+            setColorZones setColZon = {};
+            memset(&setColZon, 0, sizeof(setColZon));
+            for (int x = 0; x <= numSegments; x++) {
+            
+                
+                // generate random number
+                std::random_device rd; 
+                std::mt19937 gen(rd()); 
+                std::uniform_int_distribution<> distr(0, (hsbVec.size() - 1)); 
+                int randIndex = distr(gen);
+                
+                setColZon.start_index = static_cast<uint8_t>(x * segmentSize);
+                setColZon.hue = hsbVec[randIndex]->hue;
+                setColZon.saturation = hsbVec[randIndex]->saturation;
+                setColZon.brightness = brightness;
+                setColZon.kelvin = hsbVec[randIndex]->kelvin;
+                setColZon.duration = duration;
+
+
+
+                // check if at end to add remainder and change apply
+                if (x == numSegments) {
+                    setColZon.end_index = static_cast<uint8_t>((x * segmentSize) + remainder);
+                    setColZon.apply = APPLY;  
+                    
+                } else {
+                    setColZon.end_index = static_cast<uint8_t>((x * segmentSize) + segmentSize);
+                    setColZon.apply = NO_APPLY;          
+                } 
+
+
+
+                // prepare, send, and recive setColorZones packet
+                header.ack_required = 1;
+                header.pkt_type = SET_COLOR_ZONES;
+                Response* resp4 = sendPacket<setColorZones>(&header, &setColZon, &device, {STATE_MULTI_ZONE, ACKNOWLEDGEMENT});      // setColorZone shoudl reply with stateMultiZone, but it responsed withe acknowledgement. No clue why                                                  
+                if (resp4 == nullptr ) {
+                    std::cout << "No response from device to setColorZones - (setColorZonesf)" << std::endl;                                                  // shoudl probably try a couple more times before giving up
+                    return false;
+                }
+                stateMultiZone* sMZ = const_cast<stateMultiZone*>(reinterpret_cast<const stateMultiZone*>(resp4->content));
+                delete(resp4->content);
+                delete(resp4);
+                header.sequence++;
+                memset(&setColZon, 0, sizeof(setColZon));
+            }
+
+        
+        delete(resp3->content);
+        delete(resp3);
+        } else {
+            std::cout << "[-] Device:" << devInfo->name << " does not support multiple color zones" << std::endl;
+            return false;
+        }
+    }
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+std::vector<char*> parseColorList(char* list) {
+    std::vector<char*> result;
+    std::string str(list);
+    // Ensure input starts and ends with braces
+    if (str.front() != '{' || str.back() != '}') {
+        std::cerr << "Improper format for list of colors. -help for usage details\n";
+        return {};
+    }
+
+    // Remove the outer braces
+    str = str.substr(1, str.size() - 2);
+
+    // Parse the list
+    while (!str.empty()) {
+        // Remove leading spaces and commas
+        str.erase(0, str.find_first_not_of(" ,"));
+
+        // Hex value
+        if (!str.empty() && str.front() == '0') {
+            std::string hexValue = str.substr(0, 8); // Assume format 0xRRGGBB
+            if (hexValue.length() != 8 || hexValue.substr(0, 2) != "0x") {
+                std::cerr << "Invalid hex value format\n";
+                return {};
+            }
+            char* hexChar = new char[hexValue.size() + 1];
+            std::strcpy(hexChar, hexValue.c_str());
+            result.push_back(hexChar);
+            str = str.substr(8); // Skip the parsed hex value
+        }
+        // RGB value
+        else if (!str.empty() && str.front() == '(') {
+            size_t closeIndex = str.find(')');
+            if (closeIndex == std::string::npos) {
+                std::cerr << "Invalid RGB value format\n";
+                return {};
+            }
+            std::string rgbValue = str.substr(0, closeIndex + 1);
+            char* rgbChar = new char[rgbValue.size() + 1];
+            std::strcpy(rgbChar, rgbValue.c_str());
+            result.push_back(rgbChar);
+            str = str.substr(closeIndex + 1); // Skip the parsed RGB value
+        }
+        // Invalid format
+        else if (!str.empty()) {
+            std::cerr << "Improper format for list of colors. -help for usage details\n";
+            return {};
+        }
+    }
+
+    return result;
+}
+
+
+void genSource() {
+    
+        // generate random number 1 - 1000000
+        std::random_device rd; 
+        std::mt19937 gen(rd()); 
+        std::uniform_int_distribution<> distr(0, (1e6 - 1)); 
+        SOURCE = distr(gen);
+}
+
 
 
 
@@ -1535,9 +1752,7 @@ int main(int argc, char* argv[]) {
     uint32_t ip;
     bool broadcast = false;
     uint32_t duration = 0; 
-
-
-
+    genSource();
 
     // help
     if (isInParams(argc, argv, "-help") || isInParams(argc, argv, "--help") || isInParams(argc, argv, "-h")) {
@@ -1677,7 +1892,28 @@ int main(int argc, char* argv[]) {
             return -1;
         return 0;
 
-    } else {
+    }  else if (isInParams(argc, argv, "-multiColor")) {
+
+
+        char* list =  getNextParam(argc, argv, "-multiColor");
+        std::vector<char*> hexOrRGBVec = parseColorList(list);
+        if (hexOrRGBVec.empty()) {
+            return -1;
+        }
+
+
+
+        setColorZonesF(false, ip, 0, hexOrRGBVec);
+    // bool setColorZonesF(bool braodcast, uint32_t ip, uint32_t duration, char** coloArr) {
+
+
+
+
+
+
+
+
+   } else {
         std::cout << "[-] no comand flag provided, use -help for proper usage" << std::endl;
         return -1;
     }
