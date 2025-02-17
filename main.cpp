@@ -1,3 +1,4 @@
+
 #include <iostream>
 #include <cstdlib>
 #include <cstring>
@@ -150,7 +151,7 @@ Response* sendPacket(lx_frame_t* header, T* payload, lxDevice* lxDev, std::initi
 
 
                 lx_frame_t* response = (lx_frame_t*)buffer;
-                std::cout << "Response type: " << response->pkt_type << std::endl; //////////////////////////////////
+                //std::cout << "Response type: " << response->pkt_type << std::endl; //////////////////////////////////
                 if (response->sequence == header->sequence && (std::find(responseTypes.begin(), responseTypes.end(), response->pkt_type) != responseTypes.end())) {
 
                         lxDev->address = senderAddr.sin_addr;
@@ -968,9 +969,7 @@ bool setMultiZoneLight(lx_frame_t* header, lxDevice* device, uint32_t duration, 
                     return false;
                 }
                 header->sequence++;
-
             }
-
 
 
             for (HSBK* hsb: hsbkVec) {
@@ -1081,7 +1080,6 @@ bool setMultiZoneLight(lx_frame_t* header, lxDevice* device, uint32_t duration, 
 extendedDeviceInfo* getExtendedDeviceInfo(lx_frame_t* header, lxDevice* device) {
 
 
-    std::cout << "top of getextended device info" << std::endl; /////////////////////
      //- send getService, recieve stateService - to get proper port to use
     header->pkt_type = GET_SERVICE;
     Response* serviceResponse = sendPacket<nullPtr>(header, nullptr, device, {STATE_SERVICE});                                                     
@@ -1171,7 +1169,6 @@ extendedDeviceInfo* getExtendedDeviceInfo(lx_frame_t* header, lxDevice* device) 
                 continue;
             }
 
-
             productName = product["name"];
             capabilities.update(product["features"]);
             found = true;
@@ -1258,14 +1255,6 @@ extendedDeviceInfo* getExtendedDeviceInfo(lx_frame_t* header, lxDevice* device) 
 
 
 
-
-
-
-
-
-
-
-
 /// @breif extract hsbk info from each zone of taret device and put into json document
 /// 
 ///
@@ -1332,16 +1321,7 @@ bool saveScene(uint32_t ip, std::string path, std::string fileName, std::string 
     outFile << scene.dump(4); 
     outFile.close();
     return true;
-
-
-
-
-
-
-
-
 }
-
 
 
 
@@ -1354,7 +1334,6 @@ bool saveScene(uint32_t ip, std::string path, std::string fileName, std::string 
 ///
 /// @return bool success
 bool loadScene(uint32_t ip, std::string pathToScene, std::string sceneName, uint32_t duration) {
-
 
 
 
@@ -1485,10 +1464,6 @@ bool loadScene(uint32_t ip, std::string pathToScene, std::string sceneName, uint
 
 
 
-
-
-
-
 // Kelvin: range 2500° (warm) to 9000° (cool)
 // set staturation to 0 to get rid of color
 
@@ -1511,7 +1486,6 @@ bool setKelvin(bool broadcast, uint32_t ip, uint32_t duration, uint16_t kelvin) 
         addrs.push_back(addr);
     }
 
-    std::cout << "adders.size()" << addrs.size() << std::endl; /////////////////////
     for (int i = 0; i < addrs.size(); i++) {
 
         header.protocol = 1024;
@@ -1524,10 +1498,7 @@ bool setKelvin(bool broadcast, uint32_t ip, uint32_t duration, uint16_t kelvin) 
         device.port = htons(DEFAULT_LIFX_PORT);
 
        
-       
 
-
-        std::cout << "before getextended device info" << std::endl; /////////////////////
         //- get extendedDeviceInfo to check what zones device supports
         extendedDeviceInfo* extDevInfo =  getExtendedDeviceInfo(&header, &device);
         if(extDevInfo == nullptr) {
@@ -2070,10 +2041,6 @@ bool setColorZonesF(uint32_t ip, uint32_t duration, bool random, std::vector<HSB
         stateExtendedColorZones* sECZ = const_cast<stateExtendedColorZones*>(reinterpret_cast<const stateExtendedColorZones*>(extColZonResp->content));
         header.sequence++;
         numZones = sECZ->zones_count;
-        //if (numZones != hsbkVec.size()) {
-        //    std::cerr << "[-] number of zones of selected device does not match provided hsbk vector - (setColorZonesF)" << std::endl;
-        //    return false;
-        //}   
         delete(extColZonResp->content);
         delete(extColZonResp);
 
@@ -2155,14 +2122,6 @@ bool setColorZonesF(uint32_t ip, uint32_t duration, bool random, std::vector<HSB
 
 
 }
-
-
-
-
-
-
-
-
 
 
 
@@ -2264,104 +2223,49 @@ std::vector<HSBK*>* strToHSBKVec(const char* colorInput) {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /// @breif print the help page
 /// @return void
 void printHelp() {
 
+    std::cout << R"(
+    Usage:
+      lifx [OPTIONS] COMMAND [ARGS]
 
-    std::cout << "Usage: " << std::endl;
-    std::cout << "  Target device must be specified, wither specifically with --ip, or --all if " << std::endl;
-    std::cout << "  you want the command applie to all lifx devices on the network. Use --list " << std::endl;
-    std::cout << "  to view all lifx devices on your network. " << std::endl;
+      Target device must be specified, either explicitly with --ip or for all 
+      devices on the network with --all. Use --list to view available devices.
 
+    Commands:
+      --on, -o                      Turn a light on (can be used with --all)
+      --off, -f                     Turn a light off (can be used with --all)
+      --setColor {hex}, -c          Set a light to a single color (hex format)
+      --setColors {hex,hex}, -s     Set each zone of a multi-zone light to corresponding colors
+                                    (number of colors must match number of zones, use --info to check)
+      --setColorsR {hex,hex}, -r    Assign input colors randomly to zones
+      --brightness {percent}, -b    Set brightness (0-100%)
+      --warmth {kelvin}, -w         Set warmth in kelvin (use --info for supported range)
 
-    std::cout << "Commands: " << std::endl;
-    std::cout << "  --on:                           turns a light on            " << std::endl;
-    std::cout << "  -o:                               can be used with --all          " << std::endl;
-    std::cout << "      " << std::endl;
-    std::cout << "  --off:                          turns a light off            " << std::endl;
-    std::cout << "  -f:                               can be used with --all          " << std::endl;
-    std::cout << "      " << std::endl;
-    std::cout << "  --setColor:                     sets a light to a single color provided            " << std::endl;
-    std::cout << "  -c:                               as hex value, see color format section          " << std::endl;
-    std::cout << "      " << std::endl;
-    std::cout << "  --setColors:                    sets each zone of light to corresplonding hex             " << std::endl;
-    std::cout << "  -s:                               provided. Number of colors provided must match number of zones.   " << std::endl;
-    std::cout << "                                    only avalible for multi-zone lights. --info for number of zones" << std::endl;
-    std::cout << "      " << std::endl;
-    std::cout << "  --setColorsR:                               " << std::endl;
-    std::cout << "  -r:                                         " << std::endl;
-    std::cout << "      " << std::endl;
-    std::cout << "  --brightness:                               " << std::endl;
-    std::cout << "  -b:                                         " << std::endl;
-    std::cout << "      " << std::endl;
-    std::cout << "  --warmth:                                   " << std::endl;
-    std::cout << "  -w:                                         " << std::endl;
-    std::cout << "      " << std::endl;
+    Query Commands:
+      --list, -l                    List all LIFX devices (type, IP, MAC, status)
+      --info, -i                    Show detailed information about a device (supports --all)
 
+    Target Selection:
+      --ip {ip}, -p                 Specify target device by IPv4 address (dot notation)
+                                    (Addresses can be obtained via --list)
+      --all, -a                     Apply command to all LIFX devices on the network
+                                    (Not available for all commands)
+      --duration {milliseconds}, -d Set transition duration for actions (in milliseconds)
+                                    (Not available for all commands)
 
-    
-    std::cout << "Queery" << std::endl;
-    std::cout << "  --list: " << std::endl;
-    std::cout << "  -l: " << std::endl;
-    std::cout << "      " << std::endl;
-    std::cout << "  --info: " << std::endl;
-    std::cout << "  -i: " << std::endl;
-    std::cout << "      " << std::endl;
+    Color Format:
+      Colors must be provided as hex values inside brackets, separated by commas.
+      Use **0x** notation, not **#**.
 
+      Examples:
+        lifx --setColor [0x2e6f40] --ip 192.168.8.141
+        lifx --setColorsR [0x2e6f40,0x228b22,0xe29627,0x89cef9,0x485d18,0x290c22,0xef7ec0] --ip 192.168.8.141
 
-    std::cout << "Setter" << std::endl;
-    std::cout << "  --ip:                           ipv4 dot notaion of target lifx device          " << std::endl;
-    std::cout << "  -p:                                addresses can be obtainted with --list       " << std::endl;
-    std::cout << "                                                                                  " << std::endl;
-    std::cout << "  --all:                          sets target to all lirx device on network       " << std::endl;
-    std::cout << "  -a:                                not avalible for all commands                " << std::endl;
-    std::cout << "                                                                                  " << std::endl;
-    std::cout << "  --duration:                     sets how long an action will take to complete   " << std::endl;
-    std::cout << "  -d:                                not avalible for all commands                " << std::endl;
-    std::cout << "                                                                                  " << std::endl;
-    
-
-    std::cout << "Color Format" << std::endl;
-    std::cout << "  All collors passed by user should be hex valules inside of brackets sepperated" << std::endl;
-    std::cout << "  by commas with no spaces between" << std::endl;
-    std::cout << "  Ex.  " << std::endl;
-    std::cout << "    lifx -setColor [0x2e6f40] --ip 192.168.8.141  " << std::endl;
-    std::cout << "    lifx -setColorsR [0x2e6f40,0x228b22,0xe29627,0x89cef9,0x485d18,0x290c22,0xef7ec0]  --ip 192.168.8.141" << std::endl;
-
-
-
-
+    )" << std::endl;
 }
-
-
-
-
-
-
 
 
 
@@ -2569,7 +2473,6 @@ bool parseArgs(int argc, char** argv, inputArgs* options) {
                 std::cerr << "[-] Unknown option or missing argument" << std::endl;
             }
             return false;
-
         } 
     }
 
@@ -2585,27 +2488,6 @@ bool parseArgs(int argc, char** argv, inputArgs* options) {
         
     return true;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-/* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
-
-
 
 
 
@@ -2630,10 +2512,6 @@ int main(int argc, char** argv) {
         listDevices();
         return 0;
     }
-
-
-
-
 
 
     if (options->all && options->ip) {
@@ -2709,24 +2587,6 @@ int main(int argc, char** argv) {
         if (setKelvin(options->all, options->address, options->durVal, options->kelvin)) return 0;
         return -1;
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
