@@ -21,11 +21,15 @@
 - 🐧 Linux operating system
 - 🛠 g++ compiler
 - 🌐 LIFX LAN connectivity
+- nlohmann/json
+    * Version: [3.11.3]
+    * License: MIT License
+    * Source: https://github.com/nlohmann/json
 
 ### 🔧 Build Instructions
 ```sh
 # Clone the repository
-git clone https://github.com/yourusername/lifx-cli.git
+git clone https://github.com/tragen-va/lifx-cli.git
 cd lifx-cli
 
 # Compile the program
@@ -86,16 +90,12 @@ lifx --list
 ## Limitations
 Due to not owning all of lifx producs / different versions, some features implemented have not been fully tested
 
-
 ---
 
 ## 🤝 Contributing
 Pull requests are welcome! Please open an issue first to discuss any major changes.
 
----
 
-## 📜 License
-This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
 
 
 
