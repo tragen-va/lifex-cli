@@ -1,4 +1,3 @@
-
 #include <iostream>
 #include <cstdlib>
 #include <cstring>
@@ -17,6 +16,7 @@
 #include <optional>
 #include <fstream>
 #include <getopt.h>
+#include <tuple>
 
 #include "structsAndDefs.h"
 #include "json.hpp"
@@ -25,6 +25,7 @@
 
 
 uint32_t SOURCE;
+const std::string PATH_TO_SCENES = "scenes/";
 
 
 std::vector<in_addr> getAllDevices();
@@ -34,8 +35,8 @@ bool setPower(bool broadcast, bool brightness, uint32_t ip, uint16_t level, uint
 std::vector<HSBK*> getMultiZoneData(lx_frame_t* header, lxDevice* device, bool extended_multizone=false);
 bool setMultiZoneLight(lx_frame_t* header, lxDevice* device, uint32_t duration, std::vector<HSBK*> hsbkVec, bool extended_multizone=false);
 extendedDeviceInfo* getExtendedDeviceInfo(lx_frame_t* header, lxDevice* device);
-bool saveScene(uint32_t ip, std::string path, std::string fileName, std::string sceneName);
-bool loadScene(uint32_t ip, std::string pathToScene, std::string sceneName);
+bool saveScene(uint32_t ip, std::string sceneName);
+bool loadScene(uint32_t ip, std::string sceneName);
 bool setKelvin(bool broadcast, uint32_t ip, uint32_t duration, uint16_t kelvin);
 bool printInfo(bool broadcast, uint32_t ip);
 bool setColorF(bool broadcast, uint32_t ip, uint32_t duration, HSBK* hsbk);
@@ -47,6 +48,8 @@ bool setColorZonesF(uint32_t ip, uint32_t duration, bool random, std::vector<HSB
 std::vector<HSBK*>* strToHSBKVec(const char* colorInput);
 void printHelp();
 bool parseArgs(int argc, char** argv, inputArgs* options);
+std::vector<std::tuple<std::string, int>> getScenes(const std::string& path);
+bool listScenes(const std::string& path);
 
 
 
@@ -1261,7 +1264,41 @@ extendedDeviceInfo* getExtendedDeviceInfo(lx_frame_t* header, lxDevice* device) 
 /// 
 ///
 ///
-bool saveScene(uint32_t ip, std::string path, std::string fileName, std::string sceneName) {
+bool saveScene(uint32_t ip, std::string sceneName) {
+
+
+    //- check if sceneName entered has .json at end, if not add it. and append to path
+    if (sceneName.size() < 6) {
+        sceneName.append(".json");
+    } else {
+        std::string extention = sceneName.substr(sceneName.size() - 5);
+        if (extention != ".json") {
+            sceneName.append(".json");
+        }
+    }
+    std::string filePath = std::string(PATH_TO_SCENES);
+    filePath.append(sceneName);
+
+
+
+    
+    //- get all scens and their numZones
+    std::vector<std::tuple<std::string, int>> scenes = getScenes(PATH_TO_SCENES);
+    if (!scenes.empty()) {
+        //- check if coulnt open directory
+        if (std::get<0>(scenes[0]) == "error" && std::get<1>(scenes[0]) == 0) {
+            return false;
+        }
+        for (int i = 0; i < scenes.size(); i++) {
+            if (std::get<0>(scenes[i]) == sceneName) {
+                std::cerr << sceneName << " already exists, choise a unique name of use --deleteScene" << std::endl;
+                return false;
+            }
+        }
+    }
+
+
+
 
 
     lx_frame_t header = {};
@@ -1296,8 +1333,42 @@ bool saveScene(uint32_t ip, std::string path, std::string fileName, std::string 
     }
 
 
+    //- get numZones
+    int numZones = 0;
+    getColorZones gColZones = {};
+    gColZones.start_index = 0;
+    gColZones.end_index = 255;
+    header.pkt_type = GET_COLOR_ZONES;
+    Response* getColResponse = sendPacket<getColorZones>(&header, &gColZones, &device, {STATE_ZONE, STATE_MULTI_ZONE}); 
+    if (getColResponse == nullptr) {
+        std::cout << "No response from device to getColorZones - (kelvin)" << std::endl;
+        return false;
+    }
+    header.sequence++;
+
+    //- light currently more than 1 color
+    if (getColResponse->message_type == STATE_MULTI_ZONE) { 
+        stateMultiZone* sMZ = const_cast<stateMultiZone*>(reinterpret_cast<const stateMultiZone*>(getColResponse->content));
+        numZones = sMZ->zones_count;
+    } else {
+        return false; // only 1 color
+    }
+
+
+
+    
+
+
+
     //- insert hsbk values into json document
     nlohmann::json scene;
+    bool initSceneResult = initScene(scene, filePath, numZones);
+    if (!initSceneResult) {
+        std::cerr << "Could not initilize scene" << std::endl;
+        return false;
+    }
+
+
     for (int i = 0; i < hsbkVec.size(); i++) {
         nlohmann::json zone = {
             {"zoneNum", i},
@@ -1312,7 +1383,7 @@ bool saveScene(uint32_t ip, std::string path, std::string fileName, std::string 
 
 
 
-    std::ofstream outFile(path);
+    std::ofstream outFile(filePath);
     if (!outFile) {
         std::cerr << "Error: Unable to create file" << std::endl;
         return false;
@@ -1333,8 +1404,7 @@ bool saveScene(uint32_t ip, std::string path, std::string fileName, std::string 
 /// 
 ///
 /// @return bool success
-bool loadScene(uint32_t ip, std::string pathToScene, std::string sceneName, uint32_t duration) {
-
+bool loadScene(uint32_t ip, std::string sceneName, uint32_t duration) {
 
 
     lx_frame_t header = {};
@@ -1420,10 +1490,49 @@ bool loadScene(uint32_t ip, std::string pathToScene, std::string sceneName, uint
     }
 
 
+    //- check if sceneName entered has .json at end, if not add it
+    if (sceneName.size() < 6) {
+        sceneName.append(".json");
+    } else {
+        std::string extention = sceneName.substr(sceneName.size() - 5);
+        if (extention != ".json") {
+            sceneName.append(".json");
+        }
+    }
+
+
+
+
+
+    //- get all scens and their numZones
+    std::vector<std::tuple<std::string, int>> scenes = getScenes(PATH_TO_SCENES);
+    if (scenes.empty()) {
+        std::cerr << "[-] Unable to find any saved scenes from " << PATH_TO_SCENES << std::endl;
+        return false;
+    }
+    if (std::get<0>(scenes[0]) == "error" && std::get<1>(scenes[0]) == 0) {
+        std::cerr << "[-] An error occured while trying to access the files at " << PATH_TO_SCENES << std::endl;
+        return false;
+    } 
+    bool exists = false;
+    for (int i = 0; i < scenes.size(); i++) {
+        if (std::get<0>(scenes[i]) == sceneName) {
+            exists = true;
+        }
+    }
+    if (!exists) {
+        std::cerr << "[-] The scene name provided does not match a file at " << PATH_TO_SCENES << std::endl;
+    }
+
+
+
+
 
 
     //- retrieve the number of zones from the scene json to compare to selected device
-    std::ifstream inFile(pathToScene);
+    std::string file = std::string(PATH_TO_SCENES);
+    file.append(sceneName);
+    std::ifstream inFile(file);
     if (!inFile) {
         std::cerr << "Error: Unable to open file" << std::endl;
     }
@@ -1434,14 +1543,25 @@ bool loadScene(uint32_t ip, std::string pathToScene, std::string sceneName, uint
 
     int numZonesJson = scene[0]["scene"]["zoneCount"];
 
-    if (numZonesJson != numZones) {
-        std::cerr << "[-] The scene you are tying to use is for a device with " << numZonesJson << " zones, the device selected - " << extDevInfo->name << " has " << numZones << " zones" << std::endl;
+    if (numZonesJson < numZones) {
+        std::cerr << "[-] The scene you are tying to use is for a device with at least" << numZonesJson << " zones, the device selected - " << extDevInfo->name << " only has " << numZones << " zones" << std::endl;
         return false;
+    } 
+
+
+
+    //- extract hsbk values for each zone 
+    std::vector<HSBK*> hsbkVec;
+    for (int i = 0; i < numZones; i++) {
+        HSBK* hsbk = new HSBK();
+        hsbk->hue = scene[0]["scene"]["zones"]["hue"];
+        hsbk->saturation = scene[0]["scene"]["zones"]["saturation"];
+        hsbk->brightness = scene[0]["scene"]["zones"]["brightness"];
+        hsbk->kelvin = scene[0]["scene"]["zones"]["kelvin"];
+        hsbkVec.push_back(hsbk);
     }
 
-
-
-
+/*
     //- extract hsbk values for each zone 
     std::vector<HSBK*> hsbkVec;
     for (const auto& zone : scene[0]["scene"]["zones"]) {
@@ -1452,7 +1572,7 @@ bool loadScene(uint32_t ip, std::string pathToScene, std::string sceneName, uint
         hsbk->kelvin = zone["kelvin"];
         hsbkVec.push_back(hsbk);
     }
-
+*/
 
 
     
@@ -1689,7 +1809,7 @@ bool printInfo(bool broadcast, uint32_t ip) {
                 header.sequence++;
 
 
-                //- light currently 1 color
+                //- light currently more than 1 color
                 if (getColResponse->message_type == STATE_MULTI_ZONE) { 
                     stateMultiZone* sMZ = const_cast<stateMultiZone*>(reinterpret_cast<const stateMultiZone*>(getColResponse->content));
                     numZones = sMZ->zones_count;
@@ -2192,12 +2312,10 @@ std::vector<HSBK*>* strToHSBKVec(const char* colorInput) {
             hsbk->hue = (int)(60 * ((r - g) / delta + 4) * 182.04);
         }
 
-        // Calculate Saturation (0 - 65535)
+    
         hsbk->saturation = (maxVal == 0) ? 0 : (int)((delta / maxVal) * 65535);
-        // Calculate Brightness (0 - 65535)
         hsbk->brightness = (int)(maxVal * 65535);
-        // Default Kelvin (LIFX default: 3500K for colors)
-        hsbk->kelvin = 3500;
+        hsbk->kelvin = 3500;             // Default Kelvin (LIFX default: 3500K for colors)
         hsbkVec->push_back(hsbk);
 
 
@@ -2235,26 +2353,31 @@ void printHelp() {
       devices on the network with --all. Use --list to view available devices.
 
     Commands:
-      --on, -o                      Turn a light on (can be used with --all)
-      --off, -f                     Turn a light off (can be used with --all)
-      --setColor {hex}, -c          Set a light to a single color (hex format)
-      --setColors {hex,hex}, -s     Set each zone of a multi-zone light to corresponding colors
-                                    (number of colors must match number of zones, use --info to check)
-      --setColorsR {hex,hex}, -r    Assign input colors randomly to zones
-      --brightness {percent}, -b    Set brightness (0-100%)
-      --warmth {kelvin}, -w         Set warmth in kelvin (use --info for supported range)
+      --on, -o                          Turn a light on (can be used with --all)
+      --off, -f                         Turn a light off (can be used with --all)
+      --setColor {hex}, -c              Set a light to a single color (hex format)
+      --setColors {hex,hex}, -s         Set each zone of a multi-zone light to corresponding colors
+                                        (number of colors must match number of zones, use --info to check)
+      --setColorsR {hex,hex}, -r        Assign input colors randomly to zones
+      --brightness {percent}, -b        Set brightness (0-100%)
+      --warmth {kelvin}, -w             Set warmth in kelvin (use --info for supported range)
+      --loadScene {sceneName}, -v       Display a saved scene on selected light 
+                                        (selected scene must have at least as many zones than light)
+      --saveScene {sceneName}, -x       Save the color info for each zone to be used later
+
 
     Query Commands:
-      --list, -l                    List all LIFX devices (type, IP, MAC, status)
-      --info, -i                    Show detailed information about a device (supports --all)
+      --list, -l                        List all LIFX devices (type, IP, MAC, status)
+      --info, -i                        Show detailed information about a device (supports --all)
+      --listScene, -e                   List all saved scenes and the number of zones associated
 
     Target Selection:
-      --ip {ip}, -p                 Specify target device by IPv4 address (dot notation)
-                                    (Addresses can be obtained via --list)
-      --all, -a                     Apply command to all LIFX devices on the network
-                                    (Not available for all commands)
-      --duration {milliseconds}, -d Set transition duration for actions (in milliseconds)
-                                    (Not available for all commands)
+      --ip {ip}, -p                     Specify target device by IPv4 address (dot notation)
+                                        (Addresses can be obtained via --list)
+      --all, -a                         Apply command to all LIFX devices on the network
+                                        (Not available for all commands)
+      --duration {milliseconds}, -d     Set transition duration for actions (in milliseconds)
+                                        (Not available for all commands)
 
     Color Format:
       Colors must be provided as hex values inside brackets, separated by commas.
@@ -2269,30 +2392,150 @@ void printHelp() {
 
 
 
+/// @brief retuns all the .json files in a perticular directory as well as the number of zones for each
+/// @param string of the path to the directory the scenes are stored
+/// @return vector of tuples of string and ints all json files in directory and their number of zones, or empty if none 
+///         std::get<get>vector[0] = "error" if error
+std::vector<std::tuple<std::string, int>> getScenes(const std::string& path) {
 
 
-// -on          -o 
-// -off         -f
-// -setColor    -c
-// -list        -l
-// -info        -i
-// -brightness  -b
-// -warmth      -w
-// -setColors   -s
-// -setColorsR  -r
-// -ip          -p
-// all          -a
-// -duration    -d
-// -help        -h
+
+    std::vector<std::tuple<std::string, int>> scenes;
+    try {
+        for (const auto& entry : std::filesystem::directory_iterator(path)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".json") {
+                //- check each file to make sure it is formatted correctly and get numZones
+                try {
+                    std::ifstream file(entry.path().string());
+                    if (!file.is_open()) {
+                        std::string error = "error";
+                        std::tuple<std::string, int> errorTup = std::make_tuple(error, 0);
+                        scenes.push_back(errorTup);
+                        std::cerr << "[-] Error: Unable to open file: " << entry.path().string() << std::endl;
+                        return scenes;
+                    }
+
+                    nlohmann::json sceneJson;
+                    file >> sceneJson; // Parse the JSON file
+                    file.close();
+
+                    // Validate JSON format
+                    if (!sceneJson.is_array() || sceneJson.empty() || 
+                        !sceneJson[0].contains("scene") || !sceneJson[0]["scene"].is_object() ||
+                        !sceneJson[0]["scene"].contains("sceneName") || !sceneJson[0]["scene"]["sceneName"].is_string() ||
+                        !sceneJson[0]["scene"].contains("zoneCount") || !sceneJson[0]["scene"]["zoneCount"].is_number_integer() ||
+                        !sceneJson[0]["scene"].contains("zones") || !sceneJson[0]["scene"]["zones"].is_array()) {
+                        
+                        std::cerr << "[-] Error: Invalid JSON format in " << entry.path().string() << std::endl;
+                        continue;
+                    }
+
+                    // Extract zoneCount
+                    int zoneCount = sceneJson[0]["scene"]["zoneCount"];
+                    std::tuple<std::string, int> scene = std::make_tuple(entry.path().filename().string(), zoneCount);
+                    scenes.push_back(scene);
+                    continue;
+
+                } catch (const nlohmann::json::parse_error& e) {
+                    std::cerr << "[-] JSON Parsing error in " << entry.path().string() << ": " << e.what() << std::endl;
+                } catch (const std::exception& e) {
+                    std::cerr << "[-] Error processing file " << entry.path().string() << ": " << e.what() << std::endl;
+                }
+            }
+        }
+        if (scenes.empty()) {
+            return {};
+        }
+    } catch (const std::filesystem::filesystem_error& e){
+        std::string error = "error";
+        std::tuple<std::string, int> errorTup = std::make_tuple(error, 0);
+        scenes.push_back(errorTup);
+        std::cerr << "[-] Cannot access directory at " << path << ": " << e.what() << std::endl;
+        return scenes;
+    }
+    return scenes;
+
+}
 
 
+
+
+
+/// @breif print out all the vaid saved scenes as well as the number of zoens associated 
+/// @param the path to the scenes directory as a std::string
+/// @return bool result
+bool listScenes(const std::string& path) {
+
+
+    //- get all scens and their numZones
+    std::vector<std::tuple<std::string, int>> scenes = getScenes(path);
+    if (scenes.empty()) {
+        std::cerr << "You have no saved scenes at " << path << std::endl;
+        return false;
+    } else if (std::get<0>(scenes[0]) == "error" && std::get<1>(scenes[0]) == 0) {
+        return false;
+    }
+    
+
+    //- print scenes
+    bool first = true;
+    int sceneNameWidth = 26;
+    int numZonesWidth = 18;
+
+    for (int i = 0; i < scenes.size(); i++) {
+
+        if (first) {
+            std::cout << R"(
+--------------------------------------------------- 
+| Scene Name                | Number of Zones     | 
+---------------------------------------------------
+            )" << std::endl;
+        
+            first = false;
+        } 
+        
+        //- strip off .json from scene names
+        std::string sceneName = std::get<0>(scenes[i]).substr(0, std::get<0>(scenes[i]).size() - 5);
+
+
+    std::cout << "* " << std::setw(sceneNameWidth) << std::left << sceneName << " | " << std::setw(numZonesWidth) << std::left << std::get<1>(scenes[i]) << " | " << std::endl;
+
+    }
+
+
+
+
+    return true;
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+// --listScene -e
+// --loadScene -v {sceneName}
+// --saveScene -x {newSceneName}
+
+// getScenes    fucntion that goes into scenes directory and lists the names of each scene and num zones. Also used by saveScene and loadScene to make sure no duplicates
+// listScenes   prints out list from getScenes
 
 
 bool parseArgs(int argc, char** argv, inputArgs* options) {
 
     
 
-    const char* const shortOpts = "hofs:lib:w:c:r:p:ad:";
+    const char* const shortOpts = "hofs:lib:w:c:r:p:ad:ev:x:";
     const option longOpts[] = {
  
     {"help", no_argument, nullptr, 'h'},
@@ -2308,6 +2551,9 @@ bool parseArgs(int argc, char** argv, inputArgs* options) {
     {"ip", required_argument, nullptr, 'p'},
     {"all", no_argument, nullptr, 'a'},
     {"duration", required_argument, nullptr, 'd'},
+    {"listScene", no_argument, nullptr, 'e'},
+    {"loadScene", required_argument, nullptr, 'v'},
+    {"saveScene", required_argument, nullptr, 'x'},
     {0, 0, 0, 0}
 
     };
@@ -2465,6 +2711,30 @@ bool parseArgs(int argc, char** argv, inputArgs* options) {
             }
             options->duration = true;
             break;
+
+        case 'e': // listScene
+            options->listScene = true;
+            break;
+        case 'v': // loadScene   
+            if (optarg) { 
+                options->oldScene = std::string(optarg);
+                options->loadScene = true;
+            } else {
+                std::cerr << "[-] Missing argument for -v / --loadScene" << std::endl;
+                std::cerr << "\nUse -h for usage information" << std::endl;
+                return false;
+            }
+            break;
+        case 'x': // saveScene   
+            if (optarg) { 
+                options->newScene = std::string(optarg);
+                options->saveScene = true;
+            } else {
+                std::cerr << "[-] Missing argument for -x / --saveScene" << std::endl;
+                std::cerr << "\nUse -h for usage information" << std::endl;
+                return false;
+            }
+            break;
         default: /*  ?  */
             if (argv[optind - 1][0] == '-' && argv[optind - 1][1] != '\0') {
                 std::cerr << "[-] Unknown or invalid option: " << argv[optind - 1] << std::endl;
@@ -2512,6 +2782,13 @@ int main(int argc, char** argv) {
         listDevices();
         return 0;
     }
+
+    else if (options->listScene) {
+        if (listScenes(PATH_TO_SCENES)) return 0;
+        return -1;
+        
+    }
+
 
 
     if (options->all && options->ip) {
@@ -2583,10 +2860,36 @@ int main(int argc, char** argv) {
     }
 
     else if (options->warmth) {
-        
         if (setKelvin(options->all, options->address, options->durVal, options->kelvin)) return 0;
         return -1;
     }
+    
+
+    else if (options->loadScene) {
+        if (options->all) {
+            std::cerr << "loadScene cannot be performed on --all" << std::endl;
+            std::cerr << "Use -h for usage information" << std::endl;
+            return -1;
+        }
+        if (loadScene(options->address, options->oldScene, options->durVal)) return 0;
+        return -1;
+    }
+    
+    else if (options->saveScene) {
+        if (options->all) {
+            std::cerr << "saveScene cannot be performed on --all" << std::endl;
+            std::cerr << "Use -h for usage information" << std::endl;
+            return -1;
+        }
+        if (saveScene(options->address, options->newScene)) return 0;
+        return -1;
+    }
+
+
+
+
+
+
 
 
 
