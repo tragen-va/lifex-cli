@@ -281,6 +281,10 @@ typedef struct inputArgs {
     bool ip = false;
     bool all = false;
     bool duration = false;
+    bool listScene = false;
+    bool loadScene = false;
+    bool saveScene = false;
+
 
     HSBK* color;// for setCol
     uint32_t address = 0; // for ip and info
@@ -289,6 +293,10 @@ typedef struct inputArgs {
     std::vector<HSBK*>* colsVec; // for setCols 
     std::vector<HSBK*>* colsRVec; // for setColsR
     uint32_t durVal = 0;
+    std::string oldScene;
+    std::string newScene;
+
+
 
 } inputArgs;
 
