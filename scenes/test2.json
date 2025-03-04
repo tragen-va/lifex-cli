@@ -1,0 +1,122 @@
+[
+    {
+        "scene": {
+            "sceneName": "testName",
+            "zoneCount": 16,
+            "zones": [
+                {
+                    "brightness": 35723,
+                    "hue": 21844,
+                    "kelvin": 3500,
+                    "saturation": 49504,
+                    "zoneNum": 0
+                },
+                {
+                    "brightness": 63993,
+                    "hue": 36960,
+                    "kelvin": 3500,
+                    "saturation": 29477,
+                    "zoneNum": 1
+                },
+                {
+                    "brightness": 35723,
+                    "hue": 21844,
+                    "kelvin": 3500,
+                    "saturation": 49504,
+                    "zoneNum": 2
+                },
+                {
+                    "brightness": 35723,
+                    "hue": 21844,
+                    "kelvin": 3500,
+                    "saturation": 49504,
+                    "zoneNum": 3
+                },
+                {
+                    "brightness": 58082,
+                    "hue": 6483,
+                    "kelvin": 3500,
+                    "saturation": 54225,
+                    "zoneNum": 4
+                },
+                {
+                    "brightness": 58082,
+                    "hue": 6483,
+                    "kelvin": 3500,
+                    "saturation": 54225,
+                    "zoneNum": 5
+                },
+                {
+                    "brightness": 63993,
+                    "hue": 36960,
+                    "kelvin": 3500,
+                    "saturation": 29477,
+                    "zoneNum": 6
+                },
+                {
+                    "brightness": 35723,
+                    "hue": 21844,
+                    "kelvin": 3500,
+                    "saturation": 49504,
+                    "zoneNum": 7
+                },
+                {
+                    "brightness": 58082,
+                    "hue": 6483,
+                    "kelvin": 3500,
+                    "saturation": 54225,
+                    "zoneNum": 8
+                },
+                {
+                    "brightness": 35723,
+                    "hue": 21844,
+                    "kelvin": 3500,
+                    "saturation": 49504,
+                    "zoneNum": 9
+                },
+                {
+                    "brightness": 58082,
+                    "hue": 6483,
+                    "kelvin": 3500,
+                    "saturation": 54225,
+                    "zoneNum": 10
+                },
+                {
+                    "brightness": 23901,
+                    "hue": 14246,
+                    "kelvin": 3500,
+                    "saturation": 48622,
+                    "zoneNum": 11
+                },
+                {
+                    "brightness": 35723,
+                    "hue": 21844,
+                    "kelvin": 3500,
+                    "saturation": 49504,
+                    "zoneNum": 12
+                },
+                {
+                    "brightness": 58082,
+                    "hue": 6483,
+                    "kelvin": 3500,
+                    "saturation": 54225,
+                    "zoneNum": 13
+                },
+                {
+                    "brightness": 10537,
+                    "hue": 57248,
+                    "kelvin": 3500,
+                    "saturation": 46354,
+                    "zoneNum": 14
+                },
+                {
+                    "brightness": 58082,
+                    "hue": 6483,
+                    "kelvin": 3500,
+                    "saturation": 54225,
+                    "zoneNum": 15
+                }
+            ]
+        }
+    }
+]

@@ -2,7 +2,6 @@
 
 *A command-line tool for controlling LIFX smart lights on a Linux system.*
 
-![LIFX CLI](https://yourimageurl.com/banner.png)
 
 ## 🚀 Features
 
