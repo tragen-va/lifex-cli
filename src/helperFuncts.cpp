@@ -415,6 +415,27 @@ bool listScenes(const std::string& path) {
 
 
 
+// verify that any args passed as single dash only have 1 letter
+bool valSinleDashArgs(int argc, char** argv) {
+
+    for (int i = 1; i < argc; i++) {
+        std::string tempArg = std::string(argv[i]);
+        if (tempArg[0] == '-' && tempArg.size() > 2 && tempArg[1] != '-') {
+            std::cerr << "[-] Invalid input: " << tempArg << std::endl;
+            std::cerr << "    Single dash '-' can only be followed by single charactor" << std::endl;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+
+
+
+
+
+
 // --listScene -e
 // --loadScene -v {sceneName}
 // --saveScene -x {newSceneName}
@@ -449,6 +470,11 @@ bool parseArgs(int argc, char** argv, inputArgs* options) {
     {0, 0, 0, 0}
 
     };
+
+
+
+
+    if (!valSinleDashArgs(argc, argv)) return false;
 
 
     while(true) {

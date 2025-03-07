@@ -43,6 +43,9 @@ std::vector<std::tuple<std::string, int>> getScenes(const std::string& path);
 bool listScenes(const std::string& path);
 
 
+bool valSinleDashArgs(int argc, char** argv);
+
+
 bool parseArgs(int argc, char** argv, inputArgs* options);
 
 
