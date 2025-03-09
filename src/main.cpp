@@ -31,7 +31,14 @@ int main(int argc, char** argv) {
     }
 
     else if (options->listScene) {
-        if (listScenes(PATH_TO_SCENES)) return 0;
+
+
+
+        std::string pathToScenes;
+        if (!getPathToScenes(pathToScenes)) return -1;
+
+
+        if (listScenes(pathToScenes)) return 0;
         return -1;
         
     }

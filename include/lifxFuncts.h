@@ -27,6 +27,9 @@ bool setMultiZoneLight(lx_frame_t* header, lxDevice* device, uint32_t duration, 
 bool getExtendedDeviceInfo(lx_frame_t* header, lxDevice* device, extendedDeviceInfo& extDevInfo);
 
 
+bool getPathToScenes(std::string& pathToScenes);
+
+
 bool saveScene(uint32_t ip, std::string sceneName);
 
 

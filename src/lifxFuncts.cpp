@@ -818,6 +818,44 @@ bool getExtendedDeviceInfo(lx_frame_t* header, lxDevice* device, extendedDeviceI
 
 
 
+
+// return or create and return the path to the lifx-cli directory 
+bool getPathToScenes(std::string& pathToScenes) {
+
+    if (const char* xdgDataHome = std::getenv("XDG_DATA_HOME")) {
+        pathToScenes = std::string(xdgDataHome) + "/lifx-cli/";
+    } else {
+        pathToScenes = std::string(std::getenv("HOME")) + "/.local/share/lifx-cli/";
+    }
+
+    std::string scenesPath = pathToScenes.append("scenes/");
+
+    // Ensure lifx-cli/ exists
+    if (!std::filesystem::exists(pathToScenes)) {
+        if (!std::filesystem::create_directories(pathToScenes)) {
+            std::cerr << "[-] Failed to create directory " << pathToScenes << std::endl;
+            return false;
+        }
+    }
+
+    // Ensure scenes/ exists inside lifx-cli/
+    if (!std::filesystem::exists(scenesPath)) {
+        if (!std::filesystem::create_directories(scenesPath)) {
+            std::cerr << "[-] Failed to create directory " << scenesPath << std::endl;
+            return false;
+        }
+    }
+    return true;
+}
+
+
+
+
+
+
+
+
+
 /// @breif extract hsbk info from each zone of taret device and put into json document
 /// 
 ///
@@ -827,14 +865,9 @@ bool getExtendedDeviceInfo(lx_frame_t* header, lxDevice* device, extendedDeviceI
 bool saveScene(uint32_t ip, std::string sceneName) {
 
 
-    // Check if PATH_TO_SCENES exists, create it if not
-    if (!std::filesystem::exists(PATH_TO_SCENES)) {
-        if (!std::filesystem::create_directory(PATH_TO_SCENES)) {
-            std::cerr << "Error: Failed to create directory " << PATH_TO_SCENES << std::endl;
-            return false;
-        }
-    }
 
+    std::string pathToScenes;
+    if (!getPathToScenes(pathToScenes)) return false;
 
 
 
@@ -847,14 +880,14 @@ bool saveScene(uint32_t ip, std::string sceneName) {
             sceneName.append(".json");
         }
     }
-    std::string filePath = std::string(PATH_TO_SCENES);
+    std::string filePath = std::string(pathToScenes);
     filePath.append(sceneName);
 
 
 
     
     //- get all scens and their numZones
-    std::vector<std::tuple<std::string, int>> scenes = getScenes(PATH_TO_SCENES);
+    std::vector<std::tuple<std::string, int>> scenes = getScenes(pathToScenes);
     if (!scenes.empty()) {
         //- check if coulnt open directory
         if (std::get<0>(scenes[0]) == "error" && std::get<1>(scenes[0]) == 0) {
@@ -1069,14 +1102,20 @@ bool loadScene(uint32_t ip, std::string sceneName, uint32_t duration) {
 
 
 
+
+    std::string pathToScenes;
+    if (!getPathToScenes(pathToScenes)) return false;
+
+
+
     //- get all scens and their numZones
-    std::vector<std::tuple<std::string, int>> scenes = getScenes(PATH_TO_SCENES);
+    std::vector<std::tuple<std::string, int>> scenes = getScenes(pathToScenes);
     if (scenes.empty()) {
-        std::cerr << "[-] Unable to find any saved scenes from " << PATH_TO_SCENES << std::endl;
+        std::cerr << "[-] Unable to find any saved scenes from " << pathToScenes << std::endl;
         return false;
     }
     if (std::get<0>(scenes[0]) == "error" && std::get<1>(scenes[0]) == 0) {
-        std::cerr << "[-] An error occured while trying to access the files at " << PATH_TO_SCENES << std::endl;
+        std::cerr << "[-] An error occured while trying to access the files at " << pathToScenes << std::endl;
         return false;
     } 
     bool exists = false;
@@ -1086,13 +1125,13 @@ bool loadScene(uint32_t ip, std::string sceneName, uint32_t duration) {
         }
     }
     if (!exists) {
-        std::cerr << "[-] The scene name provided does not match a file at " << PATH_TO_SCENES << std::endl;
+        std::cerr << "[-] The scene name provided does not match a file at " << pathToScenes << std::endl;
     }
 
 
 
     //- retrieve the number of zones from the scene json to compare to selected device
-    std::string file = std::string(PATH_TO_SCENES);
+    std::string file = std::string(pathToScenes);
     file.append(sceneName);
     std::ifstream inFile(file);
     if (!inFile) {
